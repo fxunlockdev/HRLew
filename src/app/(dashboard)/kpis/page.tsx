@@ -6,6 +6,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { hasPermission } from "@/lib/rbac";
 import { formatCurrency, formatNumber } from "@/lib/utils";
+import { KPI_METRICS, KPI_PERIOD, currentPeriodStart, periodLabel } from "@/lib/kpi-metrics";
+import { computeRecruiterActuals, zeroActuals } from "@/lib/kpi-actuals";
+import { Badge } from "@/components/ui/badge";
 
 export const metadata = { title: "KPIs & Reports · HRLew" };
 
@@ -96,6 +99,55 @@ export default async function KpisPage() {
   });
   const recruiterRows = Array.from(byRecruiter.values()).sort((a, b) => b.placements - a.placements);
 
+  // ---- Staff KPI targets vs actuals (current month) ----
+  const periodStart = currentPeriodStart();
+  const monthIso = new Date(periodStart).toISOString();
+  const [{ data: staffRows }, { data: targetRows }, monthActuals] = await Promise.all([
+    supabase.from("staff").select("id, full_name, profile_id").neq("employment_status", "ex_employee"),
+    supabase
+      .from("kpi_targets")
+      .select("staff_id, metric_key, target_value")
+      .eq("period", KPI_PERIOD)
+      .eq("period_start", periodStart),
+    computeRecruiterActuals(supabase, monthIso),
+  ]);
+
+  const targetsByStaff = new Map<string, Map<string, number>>();
+  targetRows?.forEach((t: { staff_id: string; metric_key: string; target_value: number }) => {
+    const m = targetsByStaff.get(t.staff_id) ?? new Map<string, number>();
+    m.set(t.metric_key, Number(t.target_value));
+    targetsByStaff.set(t.staff_id, m);
+  });
+
+  interface AttainRow {
+    staff: string;
+    metricLabel: string;
+    currency: boolean;
+    target: number;
+    actual: number;
+    pct: number;
+  }
+  const attainmentRows: AttainRow[] = [];
+  (staffRows ?? [])
+    .filter((s: { id: string }) => targetsByStaff.has(s.id))
+    .forEach((s: { id: string; full_name: string; profile_id: string | null }) => {
+      const tmap = targetsByStaff.get(s.id)!;
+      const actuals = (s.profile_id && monthActuals.get(s.profile_id)) || zeroActuals();
+      KPI_METRICS.forEach((m) => {
+        const target = tmap.get(m.key);
+        if (target == null) return;
+        const actual = actuals[m.key];
+        attainmentRows.push({
+          staff: s.full_name,
+          metricLabel: m.label,
+          currency: !!m.currency,
+          target,
+          actual,
+          pct: target > 0 ? Math.round((actual / target) * 100) : 0,
+        });
+      });
+    });
+
   return (
     <>
       <PageHeader title="KPIs & Reports" description="Operational performance across last 30 days." />
@@ -104,6 +156,7 @@ export default async function KpisPage() {
         <TabsList>
           <TabsTrigger value="company">Company</TabsTrigger>
           <TabsTrigger value="recruiters">Recruiters</TabsTrigger>
+          {canViewRevenue && <TabsTrigger value="targets">Staff targets</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="company">
@@ -150,6 +203,59 @@ export default async function KpisPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {canViewRevenue && (
+          <TabsContent value="targets">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  Staff KPI attainment · {periodLabel(periodStart)}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {attainmentRows.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No KPI targets set yet. Open a staff member (Staff → a person) and set their
+                    monthly targets — attainment will track here automatically.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Staff</TableHead>
+                        <TableHead>Metric</TableHead>
+                        <TableHead className="text-right">Target</TableHead>
+                        <TableHead className="text-right">Actual (MTD)</TableHead>
+                        <TableHead className="text-right">Attainment</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {attainmentRows.map((r, i) => (
+                        <TableRow key={`${r.staff}-${r.metricLabel}-${i}`}>
+                          <TableCell className="font-medium">{r.staff}</TableCell>
+                          <TableCell>{r.metricLabel}</TableCell>
+                          <TableCell className="text-right">
+                            {r.currency ? formatCurrency(r.target) : formatNumber(r.target)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {r.currency ? formatCurrency(r.actual) : formatNumber(r.actual)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Badge
+                              variant={r.pct >= 100 ? "default" : r.pct >= 60 ? "secondary" : "outline"}
+                            >
+                              {r.pct}%
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
     </>
   );
