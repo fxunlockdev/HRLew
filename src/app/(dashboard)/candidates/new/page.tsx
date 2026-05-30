@@ -4,7 +4,7 @@ import { requirePermission } from "@/lib/auth";
 import { PageHeader } from "@/components/ui/page-header";
 import { CandidateForm } from "@/components/candidates/candidate-form";
 
-export const metadata = { title: "New candidate · HRLew" };
+export const metadata = { title: "New candidate · HR OS" };
 
 export default async function NewCandidatePage() {
   await requirePermission("candidates", "create");

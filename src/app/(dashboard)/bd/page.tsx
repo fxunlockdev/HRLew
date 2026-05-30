@@ -8,7 +8,7 @@ import { Plus } from "lucide-react";
 import { BdKanban } from "@/components/bd/bd-kanban";
 import { hasPermission } from "@/lib/rbac";
 
-export const metadata = { title: "Business Development · HRLew" };
+export const metadata = { title: "Business Development · HR OS" };
 
 export default async function BdPage() {
   const { profile, permissions } = await requireAuth();

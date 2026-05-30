@@ -9,7 +9,7 @@ import { CandidatesFilters } from "@/components/candidates/candidates-filters";
 import { getSettingsList } from "@/lib/settings";
 import { hasPermission } from "@/lib/rbac";
 
-export const metadata = { title: "Candidates · HRLew" };
+export const metadata = { title: "Candidates · HR OS" };
 
 interface SearchParams {
   q?: string;

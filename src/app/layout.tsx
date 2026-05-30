@@ -16,7 +16,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "HRLew — Recruitment OS",
+  title: "HR OS — Recruitment CRM",
   description: "Operating system for modern recruitment firms.",
 };
 

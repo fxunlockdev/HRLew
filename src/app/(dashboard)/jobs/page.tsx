@@ -12,7 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { FilterBar } from "@/components/layout/filter-bar";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
-export const metadata = { title: "Jobs · HRLew" };
+export const metadata = { title: "Jobs · HR OS" };
 
 export default async function JobsPage({
   searchParams,

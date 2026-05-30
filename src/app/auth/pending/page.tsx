@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 
-export const metadata = { title: "Awaiting approval · HRLew" };
+export const metadata = { title: "Awaiting approval · HR OS" };
 
 export default function PendingPage() {
   return (
@@ -16,7 +16,7 @@ export default function PendingPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <ol className="list-decimal pl-4 text-sm text-muted-foreground space-y-1">
-            <li>Notify your HRLew admin that you have signed in.</li>
+            <li>Notify your HR OS admin that you have signed in.</li>
             <li>They will assign you a role from the Permissions module.</li>
             <li>Refresh this page once activated.</li>
           </ol>

@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { JobForm } from "@/components/jobs/job-form";
 import { hasPermission } from "@/lib/rbac";
 
-export const metadata = { title: "New requirement · HRLew" };
+export const metadata = { title: "New requirement · HR OS" };
 
 export default async function NewJobPage({
   searchParams,

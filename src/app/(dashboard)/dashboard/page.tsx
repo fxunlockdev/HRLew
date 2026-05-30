@@ -7,7 +7,7 @@ import { PipelineByStage } from "@/components/dashboard/pipeline-by-stage";
 import { TopRecruiters } from "@/components/dashboard/top-recruiters";
 import { hasPermission } from "@/lib/rbac";
 
-export const metadata = { title: "Dashboard · HRLew" };
+export const metadata = { title: "Dashboard · HR OS" };
 
 interface Counts {
   totalCandidates: number;

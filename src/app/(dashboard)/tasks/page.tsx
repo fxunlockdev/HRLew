@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TaskList } from "@/components/tasks/task-list";
 import { CreateTaskInline } from "@/components/tasks/create-task-inline";
 
-export const metadata = { title: "Tasks · HRLew" };
+export const metadata = { title: "Tasks · HR OS" };
 
 export default async function TasksPage() {
   const { profile } = await requireAuth();

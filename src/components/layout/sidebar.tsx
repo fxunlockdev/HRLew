@@ -63,8 +63,8 @@ export function Sidebar({ profile, permissions }: SidebarProps) {
           HR
         </div>
         <div className="flex flex-col">
-          <span className="text-sm font-semibold">HRLew</span>
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Recruitment OS</span>
+          <span className="text-sm font-semibold">HR OS</span>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Recruitment CRM</span>
         </div>
       </div>
 

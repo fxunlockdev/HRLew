@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SettingsListEditor } from "@/components/settings/settings-list-editor";
 
-export const metadata = { title: "Settings · HRLew" };
+export const metadata = { title: "Settings · HR OS" };
 
 const LISTS = [
   { key: "candidate_status", label: "Candidate statuses" },

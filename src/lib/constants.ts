@@ -1,4 +1,4 @@
-export const APP_NAME = "HRLew";
+export const APP_NAME = "HR OS";
 export const APP_TAGLINE = "Recruitment operations OS";
 
 export const NAV_MODULES = [

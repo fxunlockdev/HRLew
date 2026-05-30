@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { PlacementForm } from "@/components/placements/placement-form";
 import { hasPermission } from "@/lib/rbac";
 
-export const metadata = { title: "New placement · HRLew" };
+export const metadata = { title: "New placement · HR OS" };
 
 export default async function NewPlacementPage() {
   const ctx = await requirePermission("placements", "create");

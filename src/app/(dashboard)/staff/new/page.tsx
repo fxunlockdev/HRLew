@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { StaffForm } from "@/components/staff/staff-form";
 import { hasPermission } from "@/lib/rbac";
 
-export const metadata = { title: "Add staff · HRLew" };
+export const metadata = { title: "Add staff · HR OS" };
 
 export default async function NewStaff() {
   const ctx = await requirePermission("staff", "create");

@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { InterviewCalendar } from "@/components/interviews/interview-calendar";
 import { formatDateTime } from "@/lib/utils";
 
-export const metadata = { title: "Interviews · HRLew" };
+export const metadata = { title: "Interviews · HR OS" };
 
 export default async function InterviewsPage() {
   const { profile, permissions } = await requireAuth();

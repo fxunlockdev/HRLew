@@ -4,7 +4,7 @@ import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
 import { InterviewForm } from "@/components/interviews/interview-form";
 
-export const metadata = { title: "Schedule interview · HRLew" };
+export const metadata = { title: "Schedule interview · HR OS" };
 
 export default async function NewInterviewPage() {
   await requirePermission("interviews", "create");

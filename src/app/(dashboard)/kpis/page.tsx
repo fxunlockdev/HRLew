@@ -10,7 +10,7 @@ import { KPI_METRICS, KPI_PERIOD, currentPeriodStart, periodLabel } from "@/lib/
 import { computeRecruiterActuals, zeroActuals } from "@/lib/kpi-actuals";
 import { Badge } from "@/components/ui/badge";
 
-export const metadata = { title: "KPIs & Reports · HRLew" };
+export const metadata = { title: "KPIs & Reports · HR OS" };
 
 interface RecruiterKpi {
   recruiter_id: string;

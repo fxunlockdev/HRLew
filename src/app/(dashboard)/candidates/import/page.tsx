@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { CandidateCsvImport } from "@/components/candidates/csv-import";
 
-export const metadata = { title: "Import candidates · HRLew" };
+export const metadata = { title: "Import candidates · HR OS" };
 
 export default async function CandidateImportPage() {
   await requirePermission("candidates", "create");

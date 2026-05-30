@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
 import { formatDate } from "@/lib/utils";
 
-export const metadata = { title: "Clients · HRLew" };
+export const metadata = { title: "Clients · HR OS" };
 
 const PAGE_SIZE = 20;
 

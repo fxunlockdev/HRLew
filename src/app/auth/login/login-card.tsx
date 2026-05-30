@@ -33,7 +33,7 @@ export function LoginCard() {
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-brand-ink text-white font-bold tracking-tight">
           HR
         </div>
-        <CardTitle className="text-2xl">Welcome to HRLew</CardTitle>
+        <CardTitle className="text-2xl">Welcome to HR OS</CardTitle>
         <CardDescription>The recruitment operations OS for your firm</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

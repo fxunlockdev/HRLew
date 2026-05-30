@@ -12,7 +12,7 @@ import { FilterBar } from "@/components/layout/filter-bar";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { hasPermission } from "@/lib/rbac";
 
-export const metadata = { title: "Placements · HRLew" };
+export const metadata = { title: "Placements · HR OS" };
 
 export default async function PlacementsPage() {
   const { profile, permissions } = await requireAuth();

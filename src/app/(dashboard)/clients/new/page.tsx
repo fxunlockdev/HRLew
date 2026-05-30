@@ -4,7 +4,7 @@ import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
 import { ClientForm } from "@/components/clients/client-form";
 
-export const metadata = { title: "New client · HRLew" };
+export const metadata = { title: "New client · HR OS" };
 
 export default async function NewClientPage() {
   await requirePermission("clients", "create");

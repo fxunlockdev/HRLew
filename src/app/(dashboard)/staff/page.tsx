@@ -9,7 +9,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { hasPermission } from "@/lib/rbac";
 
-export const metadata = { title: "Staff · HRLew" };
+export const metadata = { title: "Staff · HR OS" };
 
 export default async function StaffPage() {
   const ctx = await requirePermission("staff", "view");

@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { LoginCard } from "./login-card";
 
-export const metadata = { title: "Sign in · HRLew" };
+export const metadata = { title: "Sign in · HR OS" };
 
 export default function LoginPage() {
   return (

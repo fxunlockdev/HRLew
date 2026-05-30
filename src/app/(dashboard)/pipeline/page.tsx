@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { PipelineKanban } from "@/components/pipeline/pipeline-kanban";
 import { PipelineFilters } from "@/components/pipeline/pipeline-filters";
 
-export const metadata = { title: "Pipeline · HRLew" };
+export const metadata = { title: "Pipeline · HR OS" };
 
 export default async function PipelinePage({
   searchParams,

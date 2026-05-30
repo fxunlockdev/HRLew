@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserRoleEditor } from "@/components/permissions/user-role-editor";
 import { RolePermissionMatrix } from "@/components/permissions/role-permission-matrix";
 
-export const metadata = { title: "Permissions · HRLew" };
+export const metadata = { title: "Permissions · HR OS" };
 
 export default async function PermissionsPage() {
   await requirePermission("rbac", "view");
