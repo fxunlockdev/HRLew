@@ -32,7 +32,7 @@ create table if not exists public.roles (
   updated_at timestamptz not null default now()
 );
 
-create trigger trg_roles_updated_at
+create or replace trigger trg_roles_updated_at
   before update on public.roles
   for each row execute function public.set_updated_at();
 
@@ -63,7 +63,10 @@ create index if not exists idx_role_permissions_role on public.role_permissions(
 -- ---------------------------------------------------------------------------
 -- profiles: extends auth.users
 -- ---------------------------------------------------------------------------
-create type public.user_status as enum ('pending', 'active', 'suspended', 'archived');
+do $$ begin
+  create type public.user_status as enum ('pending', 'active', 'suspended', 'archived');
+exception when duplicate_object then null;
+end $$;
 
 create table if not exists public.profiles (
   id uuid primary key default uuid_generate_v4(),
@@ -80,7 +83,7 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
-create trigger trg_profiles_updated_at
+create or replace trigger trg_profiles_updated_at
   before update on public.profiles
   for each row execute function public.set_updated_at();
 
@@ -221,6 +224,6 @@ end;
 $$;
 
 drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
+create or replace trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_auth_user();

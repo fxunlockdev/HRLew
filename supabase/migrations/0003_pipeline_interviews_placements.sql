@@ -33,7 +33,7 @@ create index if not exists idx_pipeline_job on public.candidate_job_pipeline(job
 create index if not exists idx_pipeline_client on public.candidate_job_pipeline(client_id);
 create index if not exists idx_pipeline_stage on public.candidate_job_pipeline(current_stage);
 create index if not exists idx_pipeline_recruiter on public.candidate_job_pipeline(assigned_recruiter_id);
-create trigger trg_pipeline_updated_at before update on public.candidate_job_pipeline
+create or replace trigger trg_pipeline_updated_at before update on public.candidate_job_pipeline
   for each row execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------------
@@ -81,12 +81,12 @@ end;
 $$;
 
 drop trigger if exists trg_pipeline_stage_history on public.candidate_job_pipeline;
-create trigger trg_pipeline_stage_history
+create or replace trigger trg_pipeline_stage_history
   after insert on public.candidate_job_pipeline
   for each row execute function public.pipeline_record_stage_change();
 
 drop trigger if exists trg_pipeline_stage_history_upd on public.candidate_job_pipeline;
-create trigger trg_pipeline_stage_history_upd
+create or replace trigger trg_pipeline_stage_history_upd
   before update on public.candidate_job_pipeline
   for each row execute function public.pipeline_record_stage_change();
 
@@ -122,15 +122,17 @@ create index if not exists idx_interviews_job on public.interviews(job_id);
 create index if not exists idx_interviews_client on public.interviews(client_id);
 create index if not exists idx_interviews_scheduled on public.interviews(scheduled_at);
 create index if not exists idx_interviews_status on public.interviews(status);
-create trigger trg_interviews_updated_at before update on public.interviews
+create or replace trigger trg_interviews_updated_at before update on public.interviews
   for each row execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------------
 -- Placements
 -- ---------------------------------------------------------------------------
+create sequence if not exists public.seq_placement_display;
+
 create table if not exists public.placements (
   id uuid primary key default uuid_generate_v4(),
-  display_id text generated always as ('PL-' || lpad((floor(extract(epoch from created_at))::bigint % 1000000)::text, 6, '0')) stored,
+  display_id text not null default ('PL-' || lpad(nextval('public.seq_placement_display')::text, 6, '0')),
   candidate_id uuid not null references public.candidates(id) on delete restrict,
   client_id uuid not null references public.clients(id) on delete restrict,
   job_id uuid not null references public.job_requirements(id) on delete restrict,
@@ -163,5 +165,5 @@ create index if not exists idx_placements_job on public.placements(job_id);
 create index if not exists idx_placements_recruiter on public.placements(recruiter_id);
 create index if not exists idx_placements_status on public.placements(status);
 create index if not exists idx_placements_joining_date on public.placements(joining_date);
-create trigger trg_placements_updated_at before update on public.placements
+create or replace trigger trg_placements_updated_at before update on public.placements
   for each row execute function public.set_updated_at();

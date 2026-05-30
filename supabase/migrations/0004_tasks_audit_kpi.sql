@@ -26,7 +26,7 @@ create index if not exists idx_tasks_assigned on public.tasks(assigned_to_id);
 create index if not exists idx_tasks_status on public.tasks(status);
 create index if not exists idx_tasks_due on public.tasks(due_at);
 create index if not exists idx_tasks_entity on public.tasks(related_entity_type, related_entity_id);
-create trigger trg_tasks_updated_at before update on public.tasks
+create or replace trigger trg_tasks_updated_at before update on public.tasks
   for each row execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ create table if not exists public.kpi_targets (
   unique (staff_id, period, period_start, metric_key)
 );
 
-create trigger trg_kpi_targets_updated_at before update on public.kpi_targets
+create or replace trigger trg_kpi_targets_updated_at before update on public.kpi_targets
   for each row execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------------

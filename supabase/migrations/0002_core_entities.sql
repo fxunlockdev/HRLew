@@ -21,16 +21,24 @@ create table if not exists public.settings_lists (
 );
 
 create index if not exists idx_settings_lists_key on public.settings_lists(list_key);
-create trigger trg_settings_lists_updated_at
+create or replace trigger trg_settings_lists_updated_at
   before update on public.settings_lists
   for each row execute function public.set_updated_at();
+
+-- Sequences backing human-friendly display IDs (defaults are immutable-safe;
+-- GENERATED ALWAYS would require an immutable expression, which extract() is not).
+create sequence if not exists public.seq_client_display;
+create sequence if not exists public.seq_candidate_display;
+create sequence if not exists public.seq_job_display;
+create sequence if not exists public.seq_bd_display;
+create sequence if not exists public.seq_staff_display;
 
 -- ---------------------------------------------------------------------------
 -- Clients
 -- ---------------------------------------------------------------------------
 create table if not exists public.clients (
   id uuid primary key default uuid_generate_v4(),
-  display_id text generated always as ('CL-' || lpad((floor(extract(epoch from created_at))::bigint % 1000000)::text, 6, '0')) stored,
+  display_id text not null default ('CL-' || lpad(nextval('public.seq_client_display')::text, 6, '0')),
   name text not null,
   website text,
   industry text,
@@ -51,7 +59,7 @@ create table if not exists public.clients (
 create index if not exists idx_clients_status on public.clients(status);
 create index if not exists idx_clients_owner on public.clients(account_owner_id);
 create index if not exists idx_clients_name on public.clients(lower(name));
-create trigger trg_clients_updated_at before update on public.clients
+create or replace trigger trg_clients_updated_at before update on public.clients
   for each row execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------------
@@ -71,7 +79,7 @@ create table if not exists public.client_contacts (
 );
 
 create index if not exists idx_client_contacts_client on public.client_contacts(client_id);
-create trigger trg_client_contacts_updated_at before update on public.client_contacts
+create or replace trigger trg_client_contacts_updated_at before update on public.client_contacts
   for each row execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------------
@@ -92,7 +100,7 @@ create index if not exists idx_client_notes_client on public.client_notes(client
 -- ---------------------------------------------------------------------------
 create table if not exists public.candidates (
   id uuid primary key default uuid_generate_v4(),
-  display_id text generated always as ('CN-' || lpad((floor(extract(epoch from created_at))::bigint % 1000000)::text, 6, '0')) stored,
+  display_id text not null default ('CN-' || lpad(nextval('public.seq_candidate_display')::text, 6, '0')),
   full_name text not null,
   email citext,
   phone text,
@@ -129,7 +137,7 @@ create index if not exists idx_candidates_recruiter on public.candidates(assigne
 create index if not exists idx_candidates_status on public.candidates(status);
 create index if not exists idx_candidates_skills on public.candidates using gin (skills);
 create index if not exists idx_candidates_name on public.candidates(lower(full_name));
-create trigger trg_candidates_updated_at before update on public.candidates
+create or replace trigger trg_candidates_updated_at before update on public.candidates
   for each row execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------------
@@ -167,7 +175,7 @@ create index if not exists idx_candidate_documents_candidate on public.candidate
 -- ---------------------------------------------------------------------------
 create table if not exists public.job_requirements (
   id uuid primary key default uuid_generate_v4(),
-  display_id text generated always as ('JR-' || lpad((floor(extract(epoch from created_at))::bigint % 1000000)::text, 6, '0')) stored,
+  display_id text not null default ('JR-' || lpad(nextval('public.seq_job_display')::text, 6, '0')),
   client_id uuid not null references public.clients(id) on delete restrict,
   title text not null,
   department text,
@@ -193,7 +201,7 @@ create table if not exists public.job_requirements (
 create index if not exists idx_jobs_client on public.job_requirements(client_id);
 create index if not exists idx_jobs_status on public.job_requirements(status);
 create index if not exists idx_jobs_skills on public.job_requirements using gin (required_skills);
-create trigger trg_jobs_updated_at before update on public.job_requirements
+create or replace trigger trg_jobs_updated_at before update on public.job_requirements
   for each row execute function public.set_updated_at();
 
 -- Multi-assignment of recruiters to a job
@@ -214,7 +222,7 @@ create index if not exists idx_job_recruiters_recruiter on public.job_recruiters
 -- ---------------------------------------------------------------------------
 create table if not exists public.bd_leads (
   id uuid primary key default uuid_generate_v4(),
-  display_id text generated always as ('BD-' || lpad((floor(extract(epoch from created_at))::bigint % 1000000)::text, 6, '0')) stored,
+  display_id text not null default ('BD-' || lpad(nextval('public.seq_bd_display')::text, 6, '0')),
   company_name text not null,
   contact_name text,
   contact_email citext,
@@ -236,7 +244,7 @@ create table if not exists public.bd_leads (
 
 create index if not exists idx_bd_leads_owner on public.bd_leads(owner_id);
 create index if not exists idx_bd_leads_stage on public.bd_leads(stage);
-create trigger trg_bd_leads_updated_at before update on public.bd_leads
+create or replace trigger trg_bd_leads_updated_at before update on public.bd_leads
   for each row execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------------
@@ -261,7 +269,7 @@ create index if not exists idx_bd_activities_lead on public.bd_activities(lead_i
 create table if not exists public.staff (
   id uuid primary key default uuid_generate_v4(),
   profile_id uuid unique references public.profiles(id) on delete set null,
-  display_id text generated always as ('ST-' || lpad((floor(extract(epoch from created_at))::bigint % 1000000)::text, 6, '0')) stored,
+  display_id text not null default ('ST-' || lpad(nextval('public.seq_staff_display')::text, 6, '0')),
   full_name text not null,
   email citext,
   phone text,
@@ -280,5 +288,5 @@ create table if not exists public.staff (
 
 create index if not exists idx_staff_manager on public.staff(manager_id);
 create index if not exists idx_staff_status on public.staff(employment_status);
-create trigger trg_staff_updated_at before update on public.staff
+create or replace trigger trg_staff_updated_at before update on public.staff
   for each row execute function public.set_updated_at();
