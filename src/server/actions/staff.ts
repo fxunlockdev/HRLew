@@ -24,7 +24,8 @@ const schema = z.object({
 function parseFormData(formData: FormData) {
   const raw = Object.fromEntries(formData.entries()) as Record<string, string>;
   Object.keys(raw).forEach((k) => {
-    if (raw[k] === "") delete raw[k];
+    // Drop blanks and the "none" sentinel coming from optional Select fields.
+    if (raw[k] === "" || raw[k] === "__none__") delete raw[k];
   });
   return raw;
 }

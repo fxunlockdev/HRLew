@@ -20,6 +20,10 @@ interface Props {
   canEditSalary: boolean;
 }
 
+// Radix Select cannot use an empty string as an item value, so we use a
+// sentinel for the "none" option and strip it out on the server.
+const NONE = "__none__";
+
 export function StaffForm({ mode, staff, managers, profiles, canEditSalary }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -55,17 +59,21 @@ export function StaffForm({ mode, staff, managers, profiles, canEditSalary }: Pr
           <Field label="Department"><Input name="department" defaultValue={s?.department ?? ""} /></Field>
           <Field label="Joining date"><Input type="date" name="joining_date" defaultValue={s?.joining_date ?? ""} /></Field>
           <Field label="Manager">
-            <Select name="manager_id" defaultValue={s?.manager_id ?? ""}>
+            <Select name="manager_id" defaultValue={s?.manager_id ?? NONE}>
               <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
               <SelectContent>
-                {managers.map((m) => <SelectItem key={m.id} value={m.id}>{m.full_name}</SelectItem>)}
+                <SelectItem value={NONE}>No manager</SelectItem>
+                {managers
+                  .filter((m) => m.id !== staff?.id)
+                  .map((m) => <SelectItem key={m.id} value={m.id}>{m.full_name}</SelectItem>)}
               </SelectContent>
             </Select>
           </Field>
           <Field label="Linked profile (login)">
-            <Select name="profile_id" defaultValue={s?.profile_id ?? ""}>
+            <Select name="profile_id" defaultValue={s?.profile_id ?? NONE}>
               <SelectTrigger><SelectValue placeholder="Link an active profile" /></SelectTrigger>
               <SelectContent>
+                <SelectItem value={NONE}>No linked profile</SelectItem>
                 {profiles.map((p) => <SelectItem key={p.id} value={p.id}>{p.full_name ?? "—"}</SelectItem>)}
               </SelectContent>
             </Select>
