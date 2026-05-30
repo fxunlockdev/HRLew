@@ -59,7 +59,7 @@ export function Sidebar({ profile, permissions }: SidebarProps) {
   return (
     <aside className="hidden md:flex md:w-64 md:flex-col border-r bg-white">
       <div className="flex h-14 items-center gap-2 px-4 border-b">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white text-sm font-bold">
+        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-ink text-white text-sm font-bold">
           HR
         </div>
         <div className="flex flex-col">
@@ -80,8 +80,8 @@ export function Sidebar({ profile, permissions }: SidebarProps) {
                   className={cn(
                     "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
                     isActive
-                      ? "bg-slate-900 text-white"
-                      : "text-slate-700 hover:bg-slate-100",
+                      ? "bg-primary text-primary-foreground"
+                      : "text-foreground/70 hover:bg-accent hover:text-accent-foreground",
                   )}
                 >
                   {Icon && <Icon className="h-4 w-4" />}

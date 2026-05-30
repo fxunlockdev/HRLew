@@ -6,7 +6,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { profile, permissions } = await requireAuth();
 
   return (
-    <div className="flex min-h-screen w-full bg-slate-50">
+    <div className="flex min-h-screen w-full bg-muted">
       <Sidebar profile={profile} permissions={permissions} />
       <div className="flex flex-1 flex-col min-w-0">
         <Topbar profile={profile} />

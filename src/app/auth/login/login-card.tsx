@@ -30,7 +30,7 @@ export function LoginCard() {
   return (
     <Card className="w-full max-w-md shadow-xl border-slate-200/80">
       <CardHeader className="space-y-2 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-white font-bold tracking-tight">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-brand-ink text-white font-bold tracking-tight">
           HR
         </div>
         <CardTitle className="text-2xl">Welcome to HRLew</CardTitle>
