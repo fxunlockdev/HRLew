@@ -5,12 +5,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// App-wide locale/currency. UAE Dirham (AED), English (UAE) formatting.
+export const APP_LOCALE = "en-AE";
+export const APP_CURRENCY = "AED";
+
 export function formatCurrency(
   value: number | null | undefined,
-  currency: string = "INR",
+  currency: string = APP_CURRENCY,
 ): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat("en-IN", {
+  return new Intl.NumberFormat(APP_LOCALE, {
     style: "currency",
     currency,
     maximumFractionDigits: 0,
@@ -19,14 +23,14 @@ export function formatCurrency(
 
 export function formatNumber(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
-  return new Intl.NumberFormat("en-IN").format(value);
+  return new Intl.NumberFormat(APP_LOCALE).format(value);
 }
 
 export function formatDate(value: string | Date | null | undefined): string {
   if (!value) return "—";
   const d = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-IN", {
+  return d.toLocaleDateString(APP_LOCALE, {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -37,7 +41,7 @@ export function formatDateTime(value: string | Date | null | undefined): string 
   if (!value) return "—";
   const d = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-IN", {
+  return d.toLocaleString(APP_LOCALE, {
     day: "2-digit",
     month: "short",
     year: "numeric",
