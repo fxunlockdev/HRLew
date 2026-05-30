@@ -38,11 +38,14 @@ export function CandidateResume({ candidate, documents }: Props) {
       const path = `${candidate.id}/${Date.now()}_${file.name}`;
       const { error } = await supabase.storage.from("resumes").upload(path, file);
       if (error) throw error;
-      startTransition(() =>
-        attachResume(candidate.id, file.name, path, file.type, file.size).then(() =>
-          toast.success("Resume uploaded"),
-        ).catch((err) => toast.error(err instanceof Error ? err.message : "Upload failed")),
-      );
+      startTransition(async () => {
+        try {
+          await attachResume(candidate.id, file.name, path, file.type, file.size);
+          toast.success("Resume uploaded");
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : "Upload failed");
+        }
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {

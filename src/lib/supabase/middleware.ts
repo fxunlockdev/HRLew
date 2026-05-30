@@ -1,6 +1,8 @@
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/types/database";
+
+type CookieToSet = { name: string; value: string; options?: CookieOptions };
 
 const PUBLIC_PATHS = ["/auth/login", "/auth/callback", "/auth/pending", "/api/health"];
 
@@ -15,7 +17,7 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: CookieToSet[]) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           response = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>

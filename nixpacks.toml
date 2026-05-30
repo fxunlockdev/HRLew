@@ -1,8 +1,11 @@
 [phases.setup]
 nixPkgs = ["nodejs_20", "npm-9_x"]
 
+# NODE_ENV=production would make npm omit devDependencies, but the Next.js
+# build needs them (typescript to load next.config.ts, tailwind, postcss, etc.).
+# Force their inclusion at build time.
 [phases.install]
-cmds = ["npm ci"]
+cmds = ["npm ci --include=dev"]
 
 [phases.build]
 cmds = ["npm run build"]
