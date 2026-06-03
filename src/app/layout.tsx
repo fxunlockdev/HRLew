@@ -3,7 +3,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 
 export const metadata: Metadata = {
-  title: "HR OS — Recruitment CRM",
+  title: "HROS — Recruitment CRM",
   description: "Operating system for modern recruitment firms.",
 };
 

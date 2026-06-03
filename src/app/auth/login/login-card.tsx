@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { BrandLogo } from "@/components/ui/brand-logo";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { APP_NAME } from "@/lib/constants";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export function LoginCard() {
@@ -34,7 +35,7 @@ export function LoginCard() {
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-white p-2 shadow-md ring-1 ring-blue-100">
           <BrandLogo className="h-12 w-12" />
         </div>
-        <CardTitle className="text-2xl">Welcome to HR OS</CardTitle>
+        <CardTitle className="text-2xl">Welcome to {APP_NAME}</CardTitle>
         <CardDescription>The recruitment operations OS for your firm</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

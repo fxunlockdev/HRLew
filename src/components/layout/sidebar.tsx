@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { NAV_MODULES } from "@/lib/constants";
+import { APP_NAME } from "@/lib/constants";
 import { BrandLogo } from "@/components/ui/brand-logo";
 import { cn } from "@/lib/utils";
 import { hasPermission, isAdmin, type PermissionTuple } from "@/lib/rbac";
@@ -64,7 +65,7 @@ export function Sidebar({ profile, permissions }: SidebarProps) {
           <BrandLogo className="h-9 w-9" />
         </div>
         <div className="flex flex-col">
-          <span className="text-sm font-semibold text-blue-950">HRLew</span>
+          <span className="text-sm font-semibold text-blue-950">{APP_NAME}</span>
           <span className="text-[10px] uppercase tracking-[0.22em] text-blue-600/70">Recruitment CRM</span>
         </div>
       </div>
