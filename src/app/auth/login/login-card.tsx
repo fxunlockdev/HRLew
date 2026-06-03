@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { BrandLogo } from "@/components/ui/brand-logo";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -30,8 +31,8 @@ export function LoginCard() {
   return (
     <Card className="w-full max-w-md shadow-xl border-slate-200/80">
       <CardHeader className="space-y-2 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-brand-ink text-white font-bold tracking-tight">
-          HR
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-white p-2 shadow-md ring-1 ring-blue-100">
+          <BrandLogo className="h-12 w-12" />
         </div>
         <CardTitle className="text-2xl">Welcome to HR OS</CardTitle>
         <CardDescription>The recruitment operations OS for your firm</CardDescription>

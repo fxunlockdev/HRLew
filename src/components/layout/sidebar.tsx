@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { NAV_MODULES } from "@/lib/constants";
+import { BrandLogo } from "@/components/ui/brand-logo";
 import { cn } from "@/lib/utils";
 import { hasPermission, isAdmin, type PermissionTuple } from "@/lib/rbac";
 import type { Profile } from "@/lib/types";
@@ -59,8 +60,8 @@ export function Sidebar({ profile, permissions }: SidebarProps) {
   return (
     <aside className="hidden md:flex md:w-64 md:flex-col border-r bg-white">
       <div className="flex h-16 items-center gap-3 border-b bg-gradient-to-r from-sky-50 via-white to-blue-50 px-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-600 text-sm font-bold text-white shadow-sm">
-          HW
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white p-1 shadow-sm ring-1 ring-blue-100">
+          <BrandLogo className="h-9 w-9" />
         </div>
         <div className="flex flex-col">
           <span className="text-sm font-semibold text-blue-950">HRLew</span>
