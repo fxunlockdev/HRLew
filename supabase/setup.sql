@@ -284,6 +284,8 @@ create table if not exists public.clients (
   display_id text not null default ('CL-' || lpad(nextval('public.seq_client_display')::text, 6, '0')),
   name text not null,
   website text,
+  logo_url text,
+  logo_file_name text,
   industry text,
   company_size text,
   location text,
@@ -839,6 +841,11 @@ insert into storage.buckets (id, name, public)
 values ('resumes', 'resumes', false)
 on conflict (id) do nothing;
 
+insert into storage.buckets (id, name, public)
+values ('client-logos', 'client-logos', true)
+on conflict (id) do update
+set public = excluded.public;
+
 -- Helpful view: pipeline with denormalized names for list display
 create or replace view public.v_pipeline_overview as
 select
@@ -1160,6 +1167,19 @@ create policy resumes_update on storage.objects for update
 drop policy if exists resumes_delete on storage.objects;
 create policy resumes_delete on storage.objects for delete
   using (bucket_id = 'resumes' and public.is_manager_or_admin());
+
+drop policy if exists client_logos_insert on storage.objects;
+create policy client_logos_insert on storage.objects for insert
+  with check (bucket_id = 'client-logos' and public.is_active_user());
+
+drop policy if exists client_logos_update on storage.objects;
+create policy client_logos_update on storage.objects for update
+  using (bucket_id = 'client-logos' and public.is_active_user())
+  with check (bucket_id = 'client-logos' and public.is_active_user());
+
+drop policy if exists client_logos_delete on storage.objects;
+create policy client_logos_delete on storage.objects for delete
+  using (bucket_id = 'client-logos' and public.is_manager_or_admin());
 
 
 -- >>> SOURCE: migrations/0006_seed.sql

@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { FilterBar } from "@/components/layout/filter-bar";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pagination } from "@/components/ui/pagination";
+import { CompanyLogo } from "@/components/ui/company-logo";
 import { formatDate } from "@/lib/utils";
 
 export const metadata = { title: "Clients · HR OS" };
@@ -31,7 +32,7 @@ export default async function ClientsPage({
   let q = supabase
     .from("clients")
     .select(
-      "id, display_id, name, website, industry, location, status, account_owner_id, created_at, owner:profiles!clients_account_owner_id_fkey(full_name)",
+      "id, display_id, name, logo_url, website, industry, location, status, account_owner_id, created_at, owner:profiles!clients_account_owner_id_fkey(full_name)",
       { count: "exact" },
     )
     .order("created_at", { ascending: false })
@@ -81,10 +82,15 @@ export default async function ClientsPage({
                 return (
                   <TableRow key={c.id}>
                     <TableCell>
-                      <Link href={`/clients/${c.id}`} className="font-medium hover:underline">
-                        {c.name}
-                      </Link>
-                      <p className="text-xs text-muted-foreground">{c.display_id}</p>
+                      <div className="flex items-center gap-3">
+                        <CompanyLogo name={c.name} logoUrl={c.logo_url} className="h-10 w-10" />
+                        <div>
+                          <Link href={`/clients/${c.id}`} className="font-medium hover:underline">
+                            {c.name}
+                          </Link>
+                          <p className="text-xs text-muted-foreground">{c.display_id}</p>
+                        </div>
+                      </div>
                     </TableCell>
                     <TableCell>{c.industry ?? "—"}</TableCell>
                     <TableCell>{c.location ?? "—"}</TableCell>

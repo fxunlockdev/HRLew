@@ -9,8 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { JobForm } from "@/components/jobs/job-form";
+import { JobFunnelView } from "@/components/jobs/job-funnel-view";
 import { JobPipelineList } from "@/components/jobs/job-pipeline-list";
 import { SubmitCandidatePanel } from "@/components/jobs/submit-candidate-panel";
+import { CompanyLogo } from "@/components/ui/company-logo";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { hasPermission } from "@/lib/rbac";
 
@@ -20,13 +22,14 @@ export default async function JobDetail({ params }: { params: Promise<{ id: stri
   const supabase = await getSupabaseServerClient();
   const { data: job } = await supabase
     .from("job_requirements")
-    .select("*, client:clients(id, name)")
+    .select("*, client:clients(id, name, logo_url)")
     .eq("id", id)
     .maybeSingle();
   if (!job) notFound();
 
-  const [statuses, { data: clients }, { data: pipeline }, { data: interviews }] = await Promise.all([
+  const [statuses, pipelineStages, { data: clients }, { data: pipeline }, { data: interviews }] = await Promise.all([
     getSettingsList("job_status"),
+    getSettingsList("pipeline_stage"),
     supabase.from("clients").select("id, name").order("name"),
     supabase
       .from("candidate_job_pipeline")
@@ -60,9 +63,14 @@ export default async function JobDetail({ params }: { params: Promise<{ id: stri
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_2fr]">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">{job.title}</CardTitle>
-            <div className="mt-1">
-              <StatusBadge label={stat?.label ?? job.status} color={stat?.color} />
+            <div className="flex items-start gap-4">
+              <CompanyLogo name={job.client?.name ?? "Client"} logoUrl={job.client?.logo_url} className="h-14 w-14" />
+              <div>
+                <CardTitle className="text-base">{job.title}</CardTitle>
+                <div className="mt-1">
+                  <StatusBadge label={stat?.label ?? job.status} color={stat?.color} />
+                </div>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
@@ -104,6 +112,7 @@ export default async function JobDetail({ params }: { params: Promise<{ id: stri
         <Tabs defaultValue="pipeline">
           <TabsList>
             <TabsTrigger value="pipeline">Pipeline ({pipeline?.length ?? 0})</TabsTrigger>
+            <TabsTrigger value="funnel">Funnel</TabsTrigger>
             <TabsTrigger value="submit">Submit candidate</TabsTrigger>
             <TabsTrigger value="interviews">Interviews ({interviews?.length ?? 0})</TabsTrigger>
             <TabsTrigger value="edit">Edit</TabsTrigger>
@@ -111,6 +120,15 @@ export default async function JobDetail({ params }: { params: Promise<{ id: stri
 
           <TabsContent value="pipeline">
             <JobPipelineList rows={(pipeline ?? []) as any} canViewCtc={canViewSalary} />
+          </TabsContent>
+
+          <TabsContent value="funnel">
+            <JobFunnelView
+              rows={(pipeline ?? []) as any}
+              stages={pipelineStages}
+              clientName={job.client?.name ?? "Client"}
+              clientLogoUrl={job.client?.logo_url}
+            />
           </TabsContent>
 
           <TabsContent value="submit">

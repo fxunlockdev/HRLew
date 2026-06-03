@@ -12,6 +12,7 @@ import { ClientForm } from "@/components/clients/client-form";
 import { ClientContacts } from "@/components/clients/client-contacts";
 import { ClientNotes } from "@/components/clients/client-notes";
 import { LinkedJobsList } from "@/components/clients/linked-jobs-list";
+import { CompanyLogo } from "@/components/ui/company-logo";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { hasPermission } from "@/lib/rbac";
 
@@ -62,9 +63,14 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_2fr]">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">{client.name}</CardTitle>
-            <div className="mt-1">
-              <StatusBadge label={stat?.label ?? client.status} color={stat?.color} />
+            <div className="flex items-start gap-4">
+              <CompanyLogo name={client.name} logoUrl={client.logo_url} className="h-14 w-14" />
+              <div>
+                <CardTitle className="text-base">{client.name}</CardTitle>
+                <div className="mt-1">
+                  <StatusBadge label={stat?.label ?? client.status} color={stat?.color} />
+                </div>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">

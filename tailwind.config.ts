@@ -48,7 +48,7 @@ const config: Config = {
           DEFAULT: "var(--card)",
           foreground: "var(--card-foreground)",
         },
-        // HireLight raw tokens (use directly: text-brand, bg-brand-soft, etc.)
+        // HRLew raw tokens (use directly: text-brand, bg-brand-soft, etc.)
         brand: {
           DEFAULT: "var(--hl-accent)",
           soft: "var(--hl-accent-soft)",

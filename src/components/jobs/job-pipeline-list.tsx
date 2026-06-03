@@ -32,7 +32,8 @@ export function JobPipelineList({ rows, canViewCtc }: { rows: Row[]; canViewCtc:
             </div>
             <div className="text-right text-xs text-muted-foreground">
               <StatusBadge label={r.current_stage} />
-              <p className="mt-1">Last move {formatDate(r.last_activity_at)}</p>
+              <p className="mt-1">Submitted {formatDate(r.submitted_at)}</p>
+              <p>Last move {formatDate(r.last_activity_at)}</p>
             </div>
           </div>
         </li>

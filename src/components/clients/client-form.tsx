@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { createClient, updateClient } from "@/server/actions/clients";
+import { ClientLogoField } from "@/components/clients/client-logo-field";
 import type { Client, SettingsListItem } from "@/lib/types";
 
 interface Props {
@@ -57,6 +58,13 @@ export function ClientForm({ mode, client, statuses, owners, canEditCommercial =
         <CardContent className="grid grid-cols-1 gap-4 p-6 md:grid-cols-2">
           <Field label="Company name *"><Input name="name" defaultValue={client?.name ?? ""} required /></Field>
           <Field label="Website"><Input name="website" defaultValue={client?.website ?? ""} placeholder="https://" /></Field>
+          <Field label="Brand assets" className="md:col-span-2">
+            <ClientLogoField
+              companyName={client?.name ?? ""}
+              initialUrl={client?.logo_url}
+              initialFileName={client?.logo_file_name}
+            />
+          </Field>
           <Field label="Industry"><Input name="industry" defaultValue={client?.industry ?? ""} /></Field>
           <Field label="Company size"><Input name="company_size" defaultValue={client?.company_size ?? ""} /></Field>
           <Field label="Location"><Input name="location" defaultValue={client?.location ?? ""} /></Field>

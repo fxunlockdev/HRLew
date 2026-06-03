@@ -75,6 +75,8 @@ export interface Client {
   display_id: string;
   name: string;
   website: string | null;
+  logo_url: string | null;
+  logo_file_name: string | null;
   industry: string | null;
   company_size: string | null;
   location: string | null;

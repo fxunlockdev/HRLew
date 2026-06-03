@@ -9,6 +9,7 @@ import { hasPermission } from "@/lib/rbac";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { CompanyLogo } from "@/components/ui/company-logo";
 import { FilterBar } from "@/components/layout/filter-bar";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
@@ -26,7 +27,7 @@ export default async function JobsPage({
   let q = supabase
     .from("job_requirements")
     .select(
-      "id, display_id, title, location, work_mode, openings, priority, status, target_closure_date, min_salary, max_salary, required_skills, created_at, client:clients(id, name)",
+      "id, display_id, title, location, work_mode, openings, priority, status, target_closure_date, min_salary, max_salary, required_skills, created_at, client:clients(id, name, logo_url)",
       { count: "exact" },
     )
     .order("created_at", { ascending: false })
@@ -83,7 +84,10 @@ export default async function JobsPage({
                       <p className="text-xs text-muted-foreground">{j.display_id}</p>
                     </TableCell>
                     <TableCell>
-                      <Link href={`/clients/${j.client?.id}`} className="text-sm hover:underline">{j.client?.name}</Link>
+                      <div className="flex items-center gap-3">
+                        <CompanyLogo name={j.client?.name ?? "Client"} logoUrl={j.client?.logo_url} className="h-9 w-9" />
+                        <Link href={`/clients/${j.client?.id}`} className="text-sm hover:underline">{j.client?.name}</Link>
+                      </div>
                     </TableCell>
                     <TableCell className="text-sm">
                       {j.location ?? "—"}

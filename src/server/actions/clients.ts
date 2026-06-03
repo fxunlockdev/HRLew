@@ -9,6 +9,8 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 const clientSchema = z.object({
   name: z.string().min(2),
   website: z.string().url().optional().or(z.literal("").transform(() => undefined)),
+  logo_url: z.string().url().optional().or(z.literal("").transform(() => undefined)),
+  logo_file_name: z.string().optional(),
   industry: z.string().optional(),
   company_size: z.string().optional(),
   location: z.string().optional(),
