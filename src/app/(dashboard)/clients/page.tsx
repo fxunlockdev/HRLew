@@ -1,5 +1,8 @@
 import Link from "next/link";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile, type DB } from "@/lib/db";
+import { countAll, ilikeContains } from "@/lib/db/sql-helpers";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
+import type { ExpressionBuilder } from "kysely";
 import { requireAuth } from "@/lib/auth";
 import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
@@ -25,23 +28,60 @@ export default async function ClientsPage({
 }) {
   const { profile, permissions } = await requireAuth();
   const sp = await searchParams;
-  const supabase = await getSupabaseServerClient();
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
 
-  let q = supabase
-    .from("clients")
-    .select(
-      "id, display_id, name, logo_url, website, industry, location, status, account_owner_id, created_at, owner:profiles!clients_account_owner_id_fkey(full_name)",
-      { count: "exact" },
-    )
-    .order("created_at", { ascending: false })
-    .range(offset, offset + PAGE_SIZE - 1);
+  const { rows, total, statuses } = await withProfile(profile.id, async (trx) => {
+    const filters = (eb: ExpressionBuilder<DB, "clients">) => {
+      const conditions = [];
+      if (sp.q) {
+        conditions.push(
+          eb.or([
+            ilikeContains("name", sp.q),
+            ilikeContains("industry", sp.q),
+            ilikeContains("location", sp.q),
+          ]),
+        );
+      }
+      if (sp.status) conditions.push(eb("status", "=", sp.status));
+      return eb.and(conditions);
+    };
 
-  if (sp.q) q = q.or(`name.ilike.%${sp.q}%,industry.ilike.%${sp.q}%,location.ilike.%${sp.q}%`);
-  if (sp.status) q = q.eq("status", sp.status);
-
-  const [{ data, count }, statuses] = await Promise.all([q, getSettingsList("client_status")]);
+    return {
+      rows: await trx
+        .selectFrom("clients")
+        .select((eb) => [
+          "id",
+          "display_id",
+          "name",
+          "logo_url",
+          "website",
+          "industry",
+          "location",
+          "status",
+          "account_owner_id",
+          "created_at",
+          jsonObjectFrom(
+            eb
+              .selectFrom("profiles")
+              .select("profiles.full_name")
+              .whereRef("profiles.id", "=", "clients.account_owner_id"),
+          ).as("owner"),
+        ])
+        .where(filters)
+        .orderBy("created_at", "desc")
+        .limit(PAGE_SIZE)
+        .offset(offset)
+        .execute(),
+      total:
+        (await trx
+          .selectFrom("clients")
+          .select(countAll.as("count"))
+          .where(filters)
+          .executeTakeFirst())?.count ?? 0,
+      statuses: await getSettingsList(trx, "client_status"),
+    };
+  });
 
   return (
     <>
@@ -61,7 +101,7 @@ export default async function ClientsPage({
 
       <FilterBar searchPlaceholder="Search by name, industry, location…" />
 
-      {(data ?? []).length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState title="No clients yet" description="Add your first client to begin tracking requirements." />
       ) : (
         <div className="rounded-lg border bg-white">
@@ -77,7 +117,7 @@ export default async function ClientsPage({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(data ?? []).map((c: any) => {
+              {rows.map((c) => {
                 const stat = statuses.find((s) => s.value === c.status);
                 return (
                   <TableRow key={c.id}>
@@ -102,7 +142,7 @@ export default async function ClientsPage({
               })}
             </TableBody>
           </Table>
-          <Pagination page={page} pageSize={PAGE_SIZE} total={count ?? 0} />
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} />
         </div>
       )}
     </>

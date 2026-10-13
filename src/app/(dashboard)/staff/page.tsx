@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requirePermission } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
@@ -13,11 +14,29 @@ export const metadata = { title: "Staff · HR OS" };
 
 export default async function StaffPage() {
   const ctx = await requirePermission("staff", "view");
-  const supabase = await getSupabaseServerClient();
-  const { data: rows } = await supabase
-    .from("staff")
-    .select("id, display_id, full_name, email, designation, department, employment_status, salary, joining_date, manager:staff!staff_manager_id_fkey(full_name)")
-    .order("created_at", { ascending: false });
+  const rows = await withProfile(ctx.profile.id, (trx) =>
+    trx
+      .selectFrom("staff")
+      .select((eb) => [
+        "staff.id",
+        "staff.display_id",
+        "staff.full_name",
+        "staff.email",
+        "staff.designation",
+        "staff.department",
+        "staff.employment_status",
+        "staff.salary",
+        "staff.joining_date",
+        jsonObjectFrom(
+          eb
+            .selectFrom("staff as manager")
+            .select("manager.full_name")
+            .whereRef("manager.id", "=", "staff.manager_id"),
+        ).as("manager"),
+      ])
+      .orderBy("staff.created_at", "desc")
+      .execute(),
+  );
 
   const canViewSalary = hasPermission(ctx.profile, ctx.permissions, "staff", "view_salary") || ctx.profile.role?.name === "admin";
 
@@ -32,7 +51,7 @@ export default async function StaffPage() {
           )
         }
       />
-      {(rows ?? []).length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState title="No staff records yet" />
       ) : (
         <div className="rounded-lg border bg-white">

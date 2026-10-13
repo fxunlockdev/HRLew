@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
 import { requireAuth } from "@/lib/auth";
 import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
@@ -16,17 +17,42 @@ export const metadata = { title: "Placements · HR OS" };
 
 export default async function PlacementsPage() {
   const { profile, permissions } = await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const [{ data: rows }, statuses] = await Promise.all([
-    supabase
-      .from("placements")
-      .select(
-        "id, display_id, status, joining_date, offered_ctc, placement_revenue, invoice_status, payment_status, candidate:candidates(id, full_name), client:clients(id, name), job:job_requirements(id, title)",
-      )
-      .order("joining_date", { ascending: false, nullsFirst: false })
-      .limit(200),
-    getSettingsList("placement_status"),
-  ]);
+  const { rows, statuses } = await withProfile(profile.id, async (trx) => ({
+    rows: await trx
+      .selectFrom("placements")
+      .select((eb) => [
+        "placements.id",
+        "placements.display_id",
+        "placements.status",
+        "placements.joining_date",
+        "placements.offered_ctc",
+        "placements.placement_revenue",
+        "placements.invoice_status",
+        "placements.payment_status",
+        jsonObjectFrom(
+          eb
+            .selectFrom("candidates")
+            .select(["candidates.id", "candidates.full_name"])
+            .whereRef("candidates.id", "=", "placements.candidate_id"),
+        ).as("candidate"),
+        jsonObjectFrom(
+          eb
+            .selectFrom("clients")
+            .select(["clients.id", "clients.name"])
+            .whereRef("clients.id", "=", "placements.client_id"),
+        ).as("client"),
+        jsonObjectFrom(
+          eb
+            .selectFrom("job_requirements")
+            .select(["job_requirements.id", "job_requirements.title"])
+            .whereRef("job_requirements.id", "=", "placements.job_id"),
+        ).as("job"),
+      ])
+      .orderBy("joining_date", "desc")
+      .limit(200)
+      .execute(),
+    statuses: await getSettingsList(trx, "placement_status"),
+  }));
 
   const canViewFinancial = hasPermission(profile, permissions, "placements", "view_financial") || profile.role?.name === "admin" || profile.role?.name === "manager";
 
@@ -42,7 +68,7 @@ export default async function PlacementsPage() {
         }
       />
       <FilterBar searchPlaceholder="Search…" />
-      {(rows ?? []).length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState title="No placements yet" />
       ) : (
         <div className="rounded-lg border bg-white">

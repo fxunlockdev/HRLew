@@ -1,24 +1,13 @@
 -- ============================================================================
--- 0001_init_auth_rbac.sql
--- Extensions, helper functions, auth/RBAC schema.
+-- 0002_auth_rbac.sql
+-- Local credential store, sessions, roles/permissions and profiles.
+--
+-- Replaces Supabase Auth (GoTrue):
+--   auth.users          -> public.app_users (email + bcrypt hash)
+--   GoTrue JWT cookies  -> public.user_sessions (opaque token, sha256-hashed)
+--   auth.uid()          -> public.current_profile_id() (session GUC)
+--   on_auth_user_created trigger -> explicit admin provisioning in the app
 -- ============================================================================
-
-create extension if not exists "uuid-ossp";
-create extension if not exists "pgcrypto";
-create extension if not exists "citext";
-
--- ---------------------------------------------------------------------------
--- updated_at trigger helper
--- ---------------------------------------------------------------------------
-create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$;
 
 -- ---------------------------------------------------------------------------
 -- roles
@@ -61,7 +50,45 @@ create table if not exists public.role_permissions (
 create index if not exists idx_role_permissions_role on public.role_permissions(role_id);
 
 -- ---------------------------------------------------------------------------
--- profiles: extends auth.users
+-- app_users: credentials only. Domain identity lives on profiles.
+-- ---------------------------------------------------------------------------
+create table if not exists public.app_users (
+  id uuid primary key default uuid_generate_v4(),
+  email citext not null unique,
+  password_hash text not null,
+  must_change_password boolean not null default false,
+  failed_login_count int not null default 0,
+  locked_until timestamptz,
+  last_login_at timestamptz,
+  password_changed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create or replace trigger trg_app_users_updated_at
+  before update on public.app_users
+  for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- user_sessions: opaque bearer tokens, stored only as sha256 digests so a
+-- database leak does not hand over live sessions.
+-- ---------------------------------------------------------------------------
+create table if not exists public.user_sessions (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid not null references public.app_users(id) on delete cascade,
+  token_hash text not null unique,
+  user_agent text,
+  ip_address text,
+  created_at timestamptz not null default now(),
+  last_used_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+
+create index if not exists idx_user_sessions_user on public.user_sessions(user_id);
+create index if not exists idx_user_sessions_expires on public.user_sessions(expires_at);
+
+-- ---------------------------------------------------------------------------
+-- profiles
 -- ---------------------------------------------------------------------------
 do $$ begin
   create type public.user_status as enum ('pending', 'active', 'suspended', 'archived');
@@ -70,7 +97,7 @@ end $$;
 
 create table if not exists public.profiles (
   id uuid primary key default uuid_generate_v4(),
-  auth_user_id uuid not null unique references auth.users(id) on delete cascade,
+  user_id uuid not null unique references public.app_users(id) on delete cascade,
   full_name text,
   email citext not null unique,
   phone text,
@@ -89,9 +116,11 @@ create or replace trigger trg_profiles_updated_at
 
 create index if not exists idx_profiles_role on public.profiles(role_id);
 create index if not exists idx_profiles_status on public.profiles(status);
+create index if not exists idx_profiles_user on public.profiles(user_id);
 
 -- ---------------------------------------------------------------------------
--- Helper: current profile
+-- Helpers. All `security definer` so they can read profiles/roles regardless
+-- of the caller's own RLS visibility, exactly as the Supabase originals did.
 -- ---------------------------------------------------------------------------
 create or replace function public.current_profile()
 returns public.profiles
@@ -100,7 +129,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select p.* from public.profiles p where p.auth_user_id = auth.uid() limit 1;
+  select p.* from public.profiles p where p.id = public.current_profile_id() limit 1;
 $$;
 
 create or replace function public.current_role_name()
@@ -112,7 +141,7 @@ set search_path = public
 as $$
   select r.name from public.profiles p
   join public.roles r on r.id = p.role_id
-  where p.auth_user_id = auth.uid();
+  where p.id = public.current_profile_id();
 $$;
 
 create or replace function public.is_admin()
@@ -126,7 +155,8 @@ as $$
     select r.name = 'admin'
     from public.profiles p
     join public.roles r on r.id = p.role_id
-    where p.auth_user_id = auth.uid()
+    where p.id = public.current_profile_id()
+      and p.status = 'active'
   ), false);
 $$;
 
@@ -141,7 +171,8 @@ as $$
     select r.name in ('admin', 'manager')
     from public.profiles p
     join public.roles r on r.id = p.role_id
-    where p.auth_user_id = auth.uid()
+    where p.id = public.current_profile_id()
+      and p.status = 'active'
   ), false);
 $$;
 
@@ -155,7 +186,7 @@ as $$
   select coalesce((
     select status = 'active'
     from public.profiles
-    where auth_user_id = auth.uid()
+    where id = public.current_profile_id()
   ), false);
 $$;
 
@@ -171,59 +202,10 @@ as $$
     from public.profiles p
     join public.role_permissions rp on rp.role_id = p.role_id
     join public.permissions perm on perm.id = rp.permission_id
-    where p.auth_user_id = auth.uid()
+    where p.id = public.current_profile_id()
+      and p.status = 'active'
       and perm.module = p_module
       and perm.action = p_action
     limit 1
   ), false);
 $$;
-
--- ---------------------------------------------------------------------------
--- Auto-create profile on auth.users insert
--- (will be set to status='pending' until an admin approves)
--- ---------------------------------------------------------------------------
-create or replace function public.handle_new_auth_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_role uuid;
-  v_existing_count int;
-begin
-  select count(*) into v_existing_count from public.profiles;
-
-  -- Bootstrap: very first user becomes admin & active.
-  if v_existing_count = 0 then
-    select id into v_role from public.roles where name = 'admin' limit 1;
-    insert into public.profiles (auth_user_id, full_name, email, avatar_url, role_id, status)
-    values (
-      new.id,
-      coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', new.email),
-      new.email,
-      new.raw_user_meta_data->>'avatar_url',
-      v_role,
-      'active'
-    );
-  else
-    -- Subsequent users land as "pending" with no role.
-    insert into public.profiles (auth_user_id, full_name, email, avatar_url, status)
-    values (
-      new.id,
-      coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', new.email),
-      new.email,
-      new.raw_user_meta_data->>'avatar_url',
-      'pending'
-    )
-    on conflict (auth_user_id) do nothing;
-  end if;
-
-  return new;
-end;
-$$;
-
-drop trigger if exists on_auth_user_created on auth.users;
-create or replace trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function public.handle_new_auth_user();

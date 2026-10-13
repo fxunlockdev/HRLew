@@ -8,7 +8,7 @@ export type RoleName = "admin" | "manager" | "recruiter" | "viewer";
 
 export interface Profile {
   id: string;
-  auth_user_id: string;
+  user_id: string;
   full_name: string | null;
   email: string;
   phone: string | null;

@@ -1,7 +1,7 @@
 -- ============================================================================
 -- demo_data.sql
 -- Optional demo dataset for local testing. NOT applied automatically.
--- Run with:  psql $DATABASE_URL -f supabase/demo_data.sql
+-- Run with:  npm run db:migrate -- --demo
 -- ============================================================================
 
 -- A handful of clients

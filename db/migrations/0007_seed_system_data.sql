@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0006_seed.sql
+-- 0007_seed_system_data.sql
 -- System seed data: roles, permissions, default configurable lists.
 -- Safe to re-run.
 -- ============================================================================

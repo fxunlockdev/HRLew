@@ -6,6 +6,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { updateUserRole } from "@/server/actions/settings";
+import { UserRowActions } from "@/components/permissions/user-row-actions";
 import { toast } from "sonner";
 import { formatDate, relativeTime } from "@/lib/utils";
 
@@ -26,7 +27,15 @@ interface Role {
   description: string | null;
 }
 
-export function UserRoleEditor({ profiles, roles }: { profiles: Profile[]; roles: Role[] }) {
+export function UserRoleEditor({
+  profiles,
+  roles,
+  canManage,
+}: {
+  profiles: Profile[];
+  roles: Role[];
+  canManage: boolean;
+}) {
   const [pending, startTransition] = useTransition();
 
   function update(profileId: string, roleId: string, status: string) {
@@ -50,6 +59,7 @@ export function UserRoleEditor({ profiles, roles }: { profiles: Profile[]; roles
             <TableHead>Status</TableHead>
             <TableHead>Last seen</TableHead>
             <TableHead>Joined</TableHead>
+            {canManage && <TableHead>Credentials</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -88,6 +98,11 @@ export function UserRoleEditor({ profiles, roles }: { profiles: Profile[]; roles
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">{p.last_seen_at ? relativeTime(p.last_seen_at) : "—"}</TableCell>
               <TableCell className="text-xs text-muted-foreground">{formatDate(p.created_at)}</TableCell>
+              {canManage && (
+                <TableCell>
+                  <UserRowActions profileId={p.id} email={p.email} />
+                </TableCell>
+              )}
             </TableRow>
           ))}
         </TableBody>

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
 import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -14,20 +15,65 @@ import { formatDateTime } from "@/lib/utils";
 
 export default async function InterviewDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const { data: iv } = await supabase
-    .from("interviews")
-    .select("*, candidate:candidates(id, full_name, email), job:job_requirements(id, title), client:clients(name)")
-    .eq("id", id)
-    .maybeSingle();
-  if (!iv) notFound();
+  const { profile } = await requireAuth();
 
-  const [statuses, { data: candidates }, { data: jobs }] = await Promise.all([
-    getSettingsList("interview_status"),
-    supabase.from("candidates").select("id, full_name").order("full_name").limit(500),
-    supabase.from("job_requirements").select("id, title, client:clients(name)").order("title").limit(500),
-  ]);
+  const data = await withProfile(profile.id, async (trx) => {
+    const iv = await trx
+      .selectFrom("interviews")
+      .selectAll("interviews")
+      .select((eb) => [
+        jsonObjectFrom(
+          eb
+            .selectFrom("candidates")
+            .select(["candidates.id", "candidates.full_name", "candidates.email"])
+            .whereRef("candidates.id", "=", "interviews.candidate_id"),
+        ).as("candidate"),
+        jsonObjectFrom(
+          eb
+            .selectFrom("job_requirements")
+            .select(["job_requirements.id", "job_requirements.title"])
+            .whereRef("job_requirements.id", "=", "interviews.job_id"),
+        ).as("job"),
+        jsonObjectFrom(
+          eb
+            .selectFrom("clients")
+            .select("clients.name")
+            .whereRef("clients.id", "=", "interviews.client_id"),
+        ).as("client"),
+      ])
+      .where("interviews.id", "=", id)
+      .executeTakeFirst();
+    if (!iv) return null;
+
+    return {
+      iv,
+      statuses: await getSettingsList(trx, "interview_status"),
+      candidates: await trx
+        .selectFrom("candidates")
+        .select(["id", "full_name"])
+        .orderBy("full_name", "asc")
+        .limit(500)
+        .execute(),
+      jobs: await trx
+        .selectFrom("job_requirements")
+        .select((eb) => [
+          "job_requirements.id",
+          "job_requirements.title",
+          jsonObjectFrom(
+            eb
+              .selectFrom("clients")
+              .select("clients.name")
+              .whereRef("clients.id", "=", "job_requirements.client_id"),
+          ).as("client"),
+        ])
+        .orderBy("title", "asc")
+        .limit(500)
+        .execute(),
+    };
+  });
+
+  if (!data) notFound();
+  const { iv, statuses, candidates, jobs } = data;
   const stat = statuses.find((s) => s.value === iv.status);
 
   return (
@@ -86,10 +132,10 @@ export default async function InterviewDetail({ params }: { params: Promise<{ id
           <TabsContent value="edit">
             <InterviewForm
               mode="edit"
-              interview={iv as any}
+              interview={iv}
               statuses={statuses}
-              candidates={candidates ?? []}
-              jobs={(jobs ?? []) as any}
+              candidates={candidates}
+              jobs={jobs}
             />
           </TabsContent>
         </Tabs>

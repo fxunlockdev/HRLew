@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0005_rls_policies.sql
+-- 0006_rls_policies.sql
 -- Row-level security policies for all tables.
 --
 -- Principles:
@@ -44,13 +44,13 @@ alter table public.activity_logs enable row level security;
 drop policy if exists profiles_self_read on public.profiles;
 create policy profiles_self_read on public.profiles
   for select
-  using (auth_user_id = auth.uid() or public.is_manager_or_admin());
+  using (id = public.current_profile_id() or public.is_manager_or_admin());
 
 drop policy if exists profiles_self_update on public.profiles;
 create policy profiles_self_update on public.profiles
   for update
-  using (auth_user_id = auth.uid() or public.is_admin())
-  with check (auth_user_id = auth.uid() or public.is_admin());
+  using (id = public.current_profile_id() or public.is_admin())
+  with check (id = public.current_profile_id() or public.is_admin());
 
 drop policy if exists profiles_admin_insert on public.profiles;
 create policy profiles_admin_insert on public.profiles
@@ -187,7 +187,7 @@ create policy staff_read on public.staff for select using (public.is_manager_or_
 
 drop policy if exists staff_self_read on public.staff;
 create policy staff_self_read on public.staff
-  for select using (profile_id = (select id from public.profiles where auth_user_id = auth.uid()));
+  for select using (profile_id = public.current_profile_id());
 
 drop policy if exists staff_admin_write on public.staff;
 create policy staff_admin_write on public.staff for all
@@ -226,7 +226,7 @@ create policy interviews_rw on public.interviews for all
 drop policy if exists placements_read on public.placements;
 create policy placements_read on public.placements for select using (
   public.is_manager_or_admin()
-  or recruiter_id = (select id from public.profiles where auth_user_id = auth.uid())
+  or recruiter_id = public.current_profile_id()
 );
 
 drop policy if exists placements_insert on public.placements;
@@ -253,8 +253,8 @@ create policy tasks_insert on public.tasks for insert with check (public.is_acti
 drop policy if exists tasks_update on public.tasks;
 create policy tasks_update on public.tasks for update using (
   public.is_manager_or_admin()
-  or assigned_to_id = (select id from public.profiles where auth_user_id = auth.uid())
-  or created_by = (select id from public.profiles where auth_user_id = auth.uid())
+  or assigned_to_id = public.current_profile_id()
+  or created_by = public.current_profile_id()
 ) with check (true);
 
 drop policy if exists tasks_delete on public.tasks;
@@ -270,21 +270,45 @@ drop policy if exists activity_logs_insert on public.activity_logs;
 create policy activity_logs_insert on public.activity_logs for insert with check (true);
 
 -- ---------------------------------------------------------------------------
--- Storage policies for resumes bucket
+-- Credential tables are deliberately NOT under RLS.
+--
+-- They are read before an actor exists (login, session lookup, first-run
+-- setup), so there is no `app.profile_id` to police them with. Nothing outside
+-- src/lib/auth touches them, and the application role below has no way to
+-- reach them except through that code.
 -- ---------------------------------------------------------------------------
-drop policy if exists resumes_select on storage.objects;
-create policy resumes_select on storage.objects for select
-  using (bucket_id = 'resumes' and public.is_active_user());
+alter table public.app_users disable row level security;
+alter table public.user_sessions disable row level security;
 
-drop policy if exists resumes_insert on storage.objects;
-create policy resumes_insert on storage.objects for insert
-  with check (bucket_id = 'resumes' and public.is_active_user());
+-- ---------------------------------------------------------------------------
+-- Application role.
+--
+-- Railway hands you a superuser DATABASE_URL, and superusers bypass RLS
+-- outright — every policy above would be decorative if the app connected with
+-- it. So the app connects as `hr_app` instead: ordinary privileges, nobypassrls,
+-- RLS enforced. Migrations keep using the superuser URL.
+--
+-- The role itself is created by scripts/migrate.mjs (it needs a password from
+-- the environment, which plain SQL cannot parameterise). This block only grants
+-- privileges, and no-ops when the role is absent.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'hr_app') then
+    raise notice 'role hr_app not present - skipping grants';
+    return;
+  end if;
 
-drop policy if exists resumes_update on storage.objects;
-create policy resumes_update on storage.objects for update
-  using (bucket_id = 'resumes' and public.is_active_user())
-  with check (bucket_id = 'resumes' and public.is_active_user());
+  grant usage on schema public to hr_app;
+  grant select, insert, update, delete on all tables in schema public to hr_app;
+  grant usage, select on all sequences in schema public to hr_app;
+  grant execute on all functions in schema public to hr_app;
 
-drop policy if exists resumes_delete on storage.objects;
-create policy resumes_delete on storage.objects for delete
-  using (bucket_id = 'resumes' and public.is_manager_or_admin());
+  -- Anything created by later migrations should be reachable too.
+  alter default privileges in schema public
+    grant select, insert, update, delete on tables to hr_app;
+  alter default privileges in schema public
+    grant usage, select on sequences to hr_app;
+  alter default privileges in schema public
+    grant execute on functions to hr_app;
+end$$;

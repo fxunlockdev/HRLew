@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { searchCandidates } from "@/server/actions/candidates";
 import { submitCandidateToJob } from "@/server/actions/jobs";
 import { toast } from "sonner";
 
@@ -22,17 +22,15 @@ export function SubmitCandidatePanel({ jobId }: { jobId: string }) {
 
   async function search(term: string) {
     setQ(term);
-    if (term.length < 2) {
+    if (term.trim().length < 2) {
       setHits([]);
       return;
     }
-    const supabase = getSupabaseBrowserClient();
-    const { data } = await supabase
-      .from("candidates")
-      .select("id, full_name, email, current_company")
-      .or(`full_name.ilike.%${term}%,email.ilike.%${term}%`)
-      .limit(20);
-    setHits((data ?? []) as Hit[]);
+    try {
+      setHits(await searchCandidates(term));
+    } catch {
+      setHits([]);
+    }
   }
 
   function submit(candidateId: string) {

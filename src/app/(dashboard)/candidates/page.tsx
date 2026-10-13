@@ -1,6 +1,9 @@
 import Link from "next/link";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { requireAuth } from "@/lib/auth";
+import { withProfile, type DB } from "@/lib/db";
+import { countAll, ilikeContains } from "@/lib/db/sql-helpers";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
+import type { ExpressionBuilder } from "kysely";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Plus, Upload } from "lucide-react";
@@ -27,32 +30,77 @@ export default async function CandidatesPage({
 }) {
   const { profile, permissions } = await requireAuth();
   const sp = await searchParams;
-  const supabase = await getSupabaseServerClient();
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
 
-  let query = supabase
-    .from("candidates")
-    .select(
-      "id, display_id, full_name, email, phone, current_company, current_designation, current_location, total_experience_years, expected_ctc, status, skills, assigned_recruiter_id, created_at, recruiter:profiles!candidates_assigned_recruiter_id_fkey(full_name)",
-      { count: "exact" },
-    )
-    .order("created_at", { ascending: false })
-    .range(offset, offset + PAGE_SIZE - 1);
+  const { candidates, total, statuses, recruiters } = await withProfile(profile.id, async (trx) => {
+    // One predicate, used by both the page query and the count, so they can
+    // never disagree about what is being filtered.
+    const filters = (eb: ExpressionBuilder<DB, "candidates">) => {
+      const conditions = [];
+      if (sp.q) {
+        conditions.push(
+          eb.or([
+            ilikeContains("full_name", sp.q),
+            ilikeContains("email", sp.q),
+            ilikeContains("phone", sp.q),
+            ilikeContains("current_company", sp.q),
+          ]),
+        );
+      }
+      if (sp.status) conditions.push(eb("status", "=", sp.status));
+      if (sp.recruiter) conditions.push(eb("assigned_recruiter_id", "=", sp.recruiter));
+      return eb.and(conditions);
+    };
 
-  if (sp.q) {
-    query = query.or(
-      `full_name.ilike.%${sp.q}%,email.ilike.%${sp.q}%,phone.ilike.%${sp.q}%,current_company.ilike.%${sp.q}%`,
-    );
-  }
-  if (sp.status) query = query.eq("status", sp.status);
-  if (sp.recruiter) query = query.eq("assigned_recruiter_id", sp.recruiter);
+    const rows = await trx
+      .selectFrom("candidates")
+      .select((eb) => [
+        "id",
+        "display_id",
+        "full_name",
+        "email",
+        "phone",
+        "current_company",
+        "current_designation",
+        "current_location",
+        "total_experience_years",
+        "expected_ctc",
+        "status",
+        "skills",
+        "assigned_recruiter_id",
+        "created_at",
+        jsonObjectFrom(
+          eb
+            .selectFrom("profiles")
+            .select("profiles.full_name")
+            .whereRef("profiles.id", "=", "candidates.assigned_recruiter_id"),
+        ).as("recruiter"),
+      ])
+      .where(filters)
+      .orderBy("created_at", "desc")
+      .limit(PAGE_SIZE)
+      .offset(offset)
+      .execute();
 
-  const [{ data: candidates, count }, statuses, { data: recruiters }] = await Promise.all([
-    query,
-    getSettingsList("candidate_status"),
-    supabase.from("profiles").select("id, full_name").eq("status", "active").order("full_name"),
-  ]);
+    const counted = await trx
+      .selectFrom("candidates")
+      .select(countAll.as("count"))
+      .where(filters)
+      .executeTakeFirst();
+
+    return {
+      candidates: rows,
+      total: counted?.count ?? 0,
+      statuses: await getSettingsList(trx, "candidate_status"),
+      recruiters: await trx
+        .selectFrom("profiles")
+        .select(["id", "full_name"])
+        .where("status", "=", "active")
+        .orderBy("full_name", "asc")
+        .execute(),
+    };
+  });
 
   const canCreate = hasPermission(profile, permissions, "candidates", "create");
 
@@ -79,15 +127,15 @@ export default async function CandidatesPage({
         }
       />
 
-      <CandidatesFilters statuses={statuses} recruiters={recruiters ?? []} />
+      <CandidatesFilters statuses={statuses} recruiters={recruiters} />
 
       <CandidatesTable
-        rows={(candidates ?? []) as any}
+        rows={candidates}
         statuses={statuses}
         canViewCtc={hasPermission(profile, permissions, "candidates", "view_sensitive")}
         page={page}
         pageSize={PAGE_SIZE}
-        total={count ?? 0}
+        total={total}
       />
     </>
   );

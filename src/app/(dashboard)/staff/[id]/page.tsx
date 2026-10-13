@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { StaffForm } from "@/components/staff/staff-form";
@@ -12,26 +12,44 @@ import { currentPeriodStart, periodLabel, KPI_PERIOD } from "@/lib/kpi-metrics";
 export default async function StaffDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ctx = await requirePermission("staff", "view");
-  const supabase = await getSupabaseServerClient();
   const periodStart = currentPeriodStart();
-  const [{ data: staff }, { data: managers }, { data: profiles }, { data: kpiRows }] = await Promise.all([
-    supabase.from("staff").select("*").eq("id", id).maybeSingle(),
-    supabase.from("staff").select("id, full_name").order("full_name"),
-    supabase.from("profiles").select("id, full_name").order("full_name"),
-    supabase
-      .from("kpi_targets")
-      .select("metric_key, target_value")
-      .eq("staff_id", id)
-      .eq("period", KPI_PERIOD)
-      .eq("period_start", periodStart),
-  ]);
-  if (!staff) notFound();
+
+  const data = await withProfile(ctx.profile.id, async (trx) => {
+    const staff = await trx
+      .selectFrom("staff")
+      .selectAll()
+      .where("id", "=", id)
+      .executeTakeFirst();
+    if (!staff) return null;
+
+    return {
+      staff,
+      managers: await trx
+        .selectFrom("staff")
+        .select(["id", "full_name"])
+        .where("id", "!=", id)
+        .orderBy("full_name", "asc")
+        .execute(),
+      profiles: await trx
+        .selectFrom("profiles")
+        .select(["id", "full_name"])
+        .orderBy("full_name", "asc")
+        .execute(),
+      kpiRows: await trx
+        .selectFrom("kpi_targets")
+        .select(["metric_key", "target_value"])
+        .where("staff_id", "=", id)
+        .where("period", "=", KPI_PERIOD)
+        .where("period_start", "=", periodStart)
+        .execute(),
+    };
+  });
+
+  if (!data) notFound();
+  const { staff, managers, profiles, kpiRows } = data;
 
   const targets: Record<string, number> = Object.fromEntries(
-    (kpiRows ?? []).map((r: { metric_key: string; target_value: number }) => [
-      r.metric_key,
-      Number(r.target_value),
-    ]),
+    kpiRows.map((r) => [r.metric_key, Number(r.target_value)]),
   );
 
   return (
@@ -43,9 +61,9 @@ export default async function StaffDetail({ params }: { params: Promise<{ id: st
       />
       <StaffForm
         mode="edit"
-        staff={staff as any}
-        managers={managers ?? []}
-        profiles={profiles ?? []}
+        staff={staff}
+        managers={managers}
+        profiles={profiles}
         canEditSalary={hasPermission(ctx.profile, ctx.permissions, "staff", "edit_salary") || ctx.profile.role?.name === "admin"}
       />
       {isAdmin(ctx.profile) && (

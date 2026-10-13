@@ -1,4 +1,4 @@
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
 import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
@@ -13,12 +13,12 @@ export default async function NewJobPage({
   searchParams: Promise<{ client?: string }>;
 }) {
   const ctx = await requirePermission("jobs", "create");
-  const supabase = await getSupabaseServerClient();
   const sp = await searchParams;
-  const [statuses, { data: clients }] = await Promise.all([
-    getSettingsList("job_status"),
-    supabase.from("clients").select("id, name").order("name"),
-  ]);
+
+  const { statuses, clients } = await withProfile(ctx.profile.id, async (trx) => ({
+    statuses: await getSettingsList(trx, "job_status"),
+    clients: await trx.selectFrom("clients").select(["id", "name"]).orderBy("name", "asc").execute(),
+  }));
 
   const canEditSalary = hasPermission(ctx.profile, ctx.permissions, "jobs", "edit_salary") || ctx.profile.role?.name === "admin";
 
@@ -28,7 +28,7 @@ export default async function NewJobPage({
       <JobForm
         mode="create"
         statuses={statuses}
-        clients={clients ?? []}
+        clients={clients}
         defaultClient={sp.client}
         canEditSalary={canEditSalary}
       />

@@ -1,5 +1,8 @@
 import Link from "next/link";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile, type DB } from "@/lib/db";
+import { ilikeContains } from "@/lib/db/sql-helpers";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
+import type { ExpressionBuilder } from "kysely";
 import { requireAuth } from "@/lib/auth";
 import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
@@ -22,22 +25,48 @@ export default async function JobsPage({
 }) {
   const { profile, permissions } = await requireAuth();
   const sp = await searchParams;
-  const supabase = await getSupabaseServerClient();
+  const { rows, statuses } = await withProfile(profile.id, async (trx) => {
+    const filters = (eb: ExpressionBuilder<DB, "job_requirements">) => {
+      const conditions = [];
+      if (sp.q) {
+        conditions.push(eb.or([ilikeContains("title", sp.q), ilikeContains("location", sp.q)]));
+      }
+      if (sp.status) conditions.push(eb("status", "=", sp.status));
+      if (sp.client) conditions.push(eb("client_id", "=", sp.client));
+      return eb.and(conditions);
+    };
 
-  let q = supabase
-    .from("job_requirements")
-    .select(
-      "id, display_id, title, location, work_mode, openings, priority, status, target_closure_date, min_salary, max_salary, required_skills, created_at, client:clients(id, name, logo_url)",
-      { count: "exact" },
-    )
-    .order("created_at", { ascending: false })
-    .limit(50);
-
-  if (sp.q) q = q.or(`title.ilike.%${sp.q}%,location.ilike.%${sp.q}%`);
-  if (sp.status) q = q.eq("status", sp.status);
-  if (sp.client) q = q.eq("client_id", sp.client);
-
-  const [{ data }, statuses] = await Promise.all([q, getSettingsList("job_status")]);
+    return {
+      rows: await trx
+        .selectFrom("job_requirements")
+        .select((eb) => [
+          "id",
+          "display_id",
+          "title",
+          "location",
+          "work_mode",
+          "openings",
+          "priority",
+          "status",
+          "target_closure_date",
+          "min_salary",
+          "max_salary",
+          "required_skills",
+          "created_at",
+          jsonObjectFrom(
+            eb
+              .selectFrom("clients")
+              .select(["clients.id", "clients.name", "clients.logo_url"])
+              .whereRef("clients.id", "=", "job_requirements.client_id"),
+          ).as("client"),
+        ])
+        .where(filters)
+        .orderBy("created_at", "desc")
+        .limit(50)
+        .execute(),
+      statuses: await getSettingsList(trx, "job_status"),
+    };
+  });
 
   const canViewSalary = hasPermission(profile, permissions, "jobs", "view_salary") || profile.role?.name === "admin" || profile.role?.name === "manager";
 
@@ -57,7 +86,7 @@ export default async function JobsPage({
 
       <FilterBar searchPlaceholder="Search by title or location…" />
 
-      {(data ?? []).length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState title="No requirements yet" />
       ) : (
         <div className="rounded-lg border bg-white">
@@ -75,7 +104,7 @@ export default async function JobsPage({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(data ?? []).map((j: any) => {
+              {rows.map((j) => {
                 const stat = statuses.find((s) => s.value === j.status);
                 return (
                   <TableRow key={j.id}>

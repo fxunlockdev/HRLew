@@ -1,13 +1,17 @@
-import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { requireAuth } from "@/lib/auth";
+import { withProfile, type Tx } from "@/lib/db";
 import { PageHeader } from "@/components/ui/page-header";
 import { KpiGrid } from "@/components/dashboard/kpi-grid";
 import { PlacementChart } from "@/components/dashboard/placement-chart";
 import { PipelineByStage } from "@/components/dashboard/pipeline-by-stage";
 import { TopRecruiters } from "@/components/dashboard/top-recruiters";
 import { hasPermission } from "@/lib/rbac";
+import { sql } from "kysely";
 
 export const metadata = { title: "Dashboard · HR OS" };
+
+/** Statuses that take a candidate out of active circulation. */
+const CLOSED_CANDIDATE_STATUSES = ["rejected", "joined", "not_interested", "blacklisted"];
 
 interface Counts {
   totalCandidates: number;
@@ -22,142 +26,131 @@ interface Counts {
   revenueThisMonth: number;
 }
 
-async function loadCounts(): Promise<Counts> {
-  const supabase = await getSupabaseServerClient();
+function monthStart(): string {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+}
 
-  const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
-  const monthStart = new Date(new Date().setDate(1)).toISOString().slice(0, 10);
+/**
+ * Every headline number in one round trip. The Supabase version issued ten
+ * count queries plus a full revenue scan it summed in JS.
+ */
+async function loadCounts(trx: Tx): Promise<Counts> {
+  const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const since = monthStart();
 
-  const [
-    candidatesTotal,
-    candidatesActive,
-    candidatesWeek,
-    clientsActive,
-    jobsOpen,
-    pipelineActive,
-    interviewsScheduled,
-    offersReleased,
-    placementsThisMonth,
-    revenueRow,
-  ] = await Promise.all([
-    supabase.from("candidates").select("*", { count: "exact", head: true }),
-    supabase
-      .from("candidates")
-      .select("*", { count: "exact", head: true })
-      .not("status", "in", "(rejected,joined,not_interested,blacklisted)"),
-    supabase
-      .from("candidates")
-      .select("*", { count: "exact", head: true })
-      .gte("created_at", weekAgo),
-    supabase.from("clients").select("*", { count: "exact", head: true }).eq("status", "active"),
-    supabase.from("job_requirements").select("*", { count: "exact", head: true }).eq("status", "open"),
-    supabase.from("candidate_job_pipeline").select("*", { count: "exact", head: true }).eq("is_active", true),
-    supabase.from("interviews").select("*", { count: "exact", head: true }).eq("status", "scheduled"),
-    supabase
-      .from("candidate_job_pipeline")
-      .select("*", { count: "exact", head: true })
-      .eq("current_stage", "offer_released"),
-    supabase
-      .from("placements")
-      .select("*", { count: "exact", head: true })
-      .gte("joining_date", monthStart),
-    supabase.from("placements").select("placement_revenue").gte("joining_date", monthStart),
-  ]);
+  const row = await sql<{
+    total_candidates: number;
+    active_candidates: number;
+    new_candidates_this_week: number;
+    active_clients: number;
+    open_jobs: number;
+    pipeline_count: number;
+    scheduled_interviews: number;
+    offers_released: number;
+    placements_this_month: number;
+    revenue_this_month: number;
+  }>`
+    select
+      (select count(*)::int from candidates) as total_candidates,
+      (select count(*)::int from candidates
+        where status <> all(${sql.val(CLOSED_CANDIDATE_STATUSES)}::text[])) as active_candidates,
+      (select count(*)::int from candidates where created_at >= ${weekAgo}) as new_candidates_this_week,
+      (select count(*)::int from clients where status = 'active') as active_clients,
+      (select count(*)::int from job_requirements where status = 'open') as open_jobs,
+      (select count(*)::int from candidate_job_pipeline where is_active) as pipeline_count,
+      (select count(*)::int from interviews where status = 'scheduled') as scheduled_interviews,
+      (select count(*)::int from candidate_job_pipeline
+        where current_stage = 'offer_released') as offers_released,
+      (select count(*)::int from placements
+        where joining_date >= ${since}::date) as placements_this_month,
+      (select coalesce(sum(placement_revenue), 0)::float8 from placements
+        where joining_date >= ${since}::date) as revenue_this_month
+  `.execute(trx);
 
-  const revenueThisMonth =
-    revenueRow.data?.reduce((s, p: { placement_revenue: number | null }) => s + (p.placement_revenue ?? 0), 0) ?? 0;
-
+  const r = row.rows[0];
   return {
-    totalCandidates: candidatesTotal.count ?? 0,
-    activeCandidates: candidatesActive.count ?? 0,
-    newCandidatesThisWeek: candidatesWeek.count ?? 0,
-    activeClients: clientsActive.count ?? 0,
-    openJobs: jobsOpen.count ?? 0,
-    pipelineCount: pipelineActive.count ?? 0,
-    scheduledInterviews: interviewsScheduled.count ?? 0,
-    offersReleased: offersReleased.count ?? 0,
-    placementsThisMonth: placementsThisMonth.count ?? 0,
-    revenueThisMonth,
+    totalCandidates: r?.total_candidates ?? 0,
+    activeCandidates: r?.active_candidates ?? 0,
+    newCandidatesThisWeek: r?.new_candidates_this_week ?? 0,
+    activeClients: r?.active_clients ?? 0,
+    openJobs: r?.open_jobs ?? 0,
+    pipelineCount: r?.pipeline_count ?? 0,
+    scheduledInterviews: r?.scheduled_interviews ?? 0,
+    offersReleased: r?.offers_released ?? 0,
+    placementsThisMonth: r?.placements_this_month ?? 0,
+    revenueThisMonth: r?.revenue_this_month ?? 0,
   };
 }
 
-async function loadPipelineByStage() {
-  const supabase = await getSupabaseServerClient();
-  const { data } = await supabase
-    .from("candidate_job_pipeline")
-    .select("current_stage")
-    .eq("is_active", true);
-
-  const buckets = new Map<string, number>();
-  data?.forEach((row: { current_stage: string }) => {
-    buckets.set(row.current_stage, (buckets.get(row.current_stage) ?? 0) + 1);
-  });
-  return Array.from(buckets.entries()).map(([stage, count]) => ({ stage, count }));
+async function loadPipelineByStage(trx: Tx) {
+  const rows = await trx
+    .selectFrom("candidate_job_pipeline")
+    .select(["current_stage as stage", sql<number>`count(*)::int`.as("count")])
+    .where("is_active", "=", true)
+    .groupBy("current_stage")
+    .orderBy("count", "desc")
+    .execute();
+  return rows;
 }
 
-async function loadPlacementsByMonth() {
-  const supabase = await getSupabaseServerClient();
-  const sixMonthsAgo = new Date();
-  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
-  sixMonthsAgo.setDate(1);
+async function loadPlacementsByMonth(trx: Tx) {
+  const start = new Date();
+  start.setUTCMonth(start.getUTCMonth() - 5);
+  start.setUTCDate(1);
 
-  const { data } = await supabase
-    .from("placements")
-    .select("joining_date, placement_revenue")
-    .gte("joining_date", sixMonthsAgo.toISOString().slice(0, 10));
+  const rows = await sql<{ month: string; count: number; revenue: number }>`
+    select
+      to_char(date_trunc('month', joining_date), 'YYYY-MM') as month,
+      count(*)::int as count,
+      coalesce(sum(placement_revenue), 0)::float8 as revenue
+    from placements
+    where joining_date >= ${start.toISOString().slice(0, 10)}::date
+    group by 1
+    order by 1
+  `.execute(trx);
 
-  const buckets = new Map<string, { count: number; revenue: number }>();
-  data?.forEach((row: { joining_date: string | null; placement_revenue: number | null }) => {
-    if (!row.joining_date) return;
-    const key = row.joining_date.slice(0, 7); // YYYY-MM
-    const b = buckets.get(key) ?? { count: 0, revenue: 0 };
-    b.count += 1;
-    b.revenue += row.placement_revenue ?? 0;
-    buckets.set(key, b);
-  });
-  return Array.from(buckets.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, v]) => ({ month, ...v }));
+  return rows.rows;
 }
 
-async function loadTopRecruiters() {
-  const supabase = await getSupabaseServerClient();
+async function loadTopRecruiters(trx: Tx) {
   const since = new Date();
-  since.setMonth(since.getMonth() - 1);
+  since.setUTCMonth(since.getUTCMonth() - 1);
 
-  const { data } = await supabase
-    .from("placements")
-    .select("recruiter_id, placement_revenue, profile:profiles!placements_recruiter_id_fkey(full_name)")
-    .gte("created_at", since.toISOString());
+  const rows = await trx
+    .selectFrom("placements")
+    .leftJoin("profiles", "profiles.id", "placements.recruiter_id")
+    .select([
+      sql<string>`coalesce(profiles.full_name, 'Unknown')`.as("name"),
+      sql<number>`count(*)::int`.as("placements"),
+      sql<number>`coalesce(sum(placements.placement_revenue), 0)::float8`.as("revenue"),
+    ])
+    .where("placements.created_at", ">=", since.toISOString())
+    .where("placements.recruiter_id", "is not", null)
+    .groupBy(["placements.recruiter_id", "profiles.full_name"])
+    .orderBy("placements", "desc")
+    .limit(5)
+    .execute();
 
-  const buckets = new Map<string, { name: string; placements: number; revenue: number }>();
-  data?.forEach((row: any) => {
-    if (!row.recruiter_id) return;
-    const cur = buckets.get(row.recruiter_id) ?? {
-      name: row.profile?.full_name ?? "Unknown",
-      placements: 0,
-      revenue: 0,
-    };
-    cur.placements += 1;
-    cur.revenue += row.placement_revenue ?? 0;
-    buckets.set(row.recruiter_id, cur);
-  });
-
-  return Array.from(buckets.values())
-    .sort((a, b) => b.placements - a.placements)
-    .slice(0, 5);
+  return rows;
 }
 
 export default async function DashboardPage() {
   const { profile, permissions } = await requireAuth();
-  const canViewRevenue = hasPermission(profile, permissions, "kpi", "view_company") || profile.role?.name === "admin" || profile.role?.name === "manager";
+  const canViewRevenue =
+    hasPermission(profile, permissions, "kpi", "view_company") ||
+    profile.role?.name === "admin" ||
+    profile.role?.name === "manager";
 
-  const [counts, pipelineByStage, placementsByMonth, topRecruiters] = await Promise.all([
-    loadCounts(),
-    loadPipelineByStage(),
-    loadPlacementsByMonth(),
-    loadTopRecruiters(),
-  ]);
+  const { counts, pipelineByStage, placementsByMonth, topRecruiters } = await withProfile(
+    profile.id,
+    async (trx) => ({
+      counts: await loadCounts(trx),
+      pipelineByStage: await loadPipelineByStage(trx),
+      placementsByMonth: await loadPlacementsByMonth(trx),
+      topRecruiters: await loadTopRecruiters(trx),
+    }),
+  );
 
   return (
     <>

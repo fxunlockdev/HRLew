@@ -1,6 +1,6 @@
 -- ============================================================================
--- 0004_tasks_audit_kpi.sql
--- Tasks/follow-ups, KPI targets, generic activity log, storage.
+-- 0005_tasks_audit_kpi.sql
+-- Tasks/follow-ups, KPI targets, generic activity log, reporting view.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ declare
   v_actor uuid;
   v_entity_id uuid;
 begin
-  select id into v_actor from public.profiles where auth_user_id = auth.uid();
+  v_actor := public.current_profile_id();
 
   if tg_op = 'DELETE' then
     v_entity_id := old.id;
@@ -119,13 +119,6 @@ begin
     );
   end loop;
 end$$;
-
--- ---------------------------------------------------------------------------
--- Storage bucket for resumes (created idempotently)
--- ---------------------------------------------------------------------------
-insert into storage.buckets (id, name, public)
-values ('resumes', 'resumes', false)
-on conflict (id) do nothing;
 
 -- Helpful view: pipeline with denormalized names for list display
 create or replace view public.v_pipeline_overview as

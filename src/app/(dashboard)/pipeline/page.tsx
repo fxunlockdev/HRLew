@@ -1,4 +1,5 @@
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile, type DB } from "@/lib/db";
+import type { ExpressionBuilder } from "kysely";
 import { requireAuth } from "@/lib/auth";
 import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
@@ -12,27 +13,42 @@ export default async function PipelinePage({
 }: {
   searchParams: Promise<{ job?: string; client?: string; recruiter?: string }>;
 }) {
-  await requireAuth();
+  const { profile } = await requireAuth();
   const sp = await searchParams;
-  const supabase = await getSupabaseServerClient();
 
-  let q = supabase
-    .from("v_pipeline_overview")
-    .select("*")
-    .eq("is_active", true)
-    .limit(500);
+  const { rows, stages, jobs, clients, recruiters } = await withProfile(profile.id, async (trx) => {
+    const filters = (eb: ExpressionBuilder<DB, "v_pipeline_overview">) => {
+      const conditions = [eb("is_active", "=", true)];
+      if (sp.job) conditions.push(eb("job_id", "=", sp.job));
+      if (sp.client) conditions.push(eb("client_id", "=", sp.client));
+      if (sp.recruiter) conditions.push(eb("recruiter_id", "=", sp.recruiter));
+      return eb.and(conditions);
+    };
 
-  if (sp.job) q = q.eq("job_id", sp.job);
-  if (sp.client) q = q.eq("client_id", sp.client);
-  if (sp.recruiter) q = q.eq("recruiter_id", sp.recruiter);
-
-  const [{ data: rows }, stages, { data: jobs }, { data: clients }, { data: recruiters }] = await Promise.all([
-    q,
-    getSettingsList("pipeline_stage"),
-    supabase.from("job_requirements").select("id, title").eq("status", "open").order("title"),
-    supabase.from("clients").select("id, name").order("name"),
-    supabase.from("profiles").select("id, full_name").eq("status", "active").order("full_name"),
-  ]);
+    return {
+      rows: await trx
+        .selectFrom("v_pipeline_overview")
+        .selectAll()
+        .where(filters)
+        .orderBy("last_activity_at", "desc")
+        .limit(500)
+        .execute(),
+      stages: await getSettingsList(trx, "pipeline_stage"),
+      jobs: await trx
+        .selectFrom("job_requirements")
+        .select(["id", "title"])
+        .where("status", "=", "open")
+        .orderBy("title", "asc")
+        .execute(),
+      clients: await trx.selectFrom("clients").select(["id", "name"]).orderBy("name", "asc").execute(),
+      recruiters: await trx
+        .selectFrom("profiles")
+        .select(["id", "full_name"])
+        .where("status", "=", "active")
+        .orderBy("full_name", "asc")
+        .execute(),
+    };
+  });
 
   return (
     <>
@@ -40,8 +56,8 @@ export default async function PipelinePage({
         title="Pipeline"
         description="Job-specific candidate flow. Move candidates by changing their stage."
       />
-      <PipelineFilters jobs={jobs ?? []} clients={clients ?? []} recruiters={recruiters ?? []} />
-      <PipelineKanban rows={(rows ?? []) as any} stages={stages} />
+      <PipelineFilters jobs={jobs} clients={clients} recruiters={recruiters} />
+      <PipelineKanban rows={rows} stages={stages} />
     </>
   );
 }

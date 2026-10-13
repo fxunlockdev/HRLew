@@ -3,6 +3,10 @@ import { SignOutButton } from "@/components/auth/sign-out-button";
 
 export const metadata = { title: "Awaiting approval · HR OS" };
 
+// Asks the database whether this instance has any accounts yet, so it must
+// not be prerendered — a baked-in answer would strand users on the wrong page.
+export const dynamic = "force-dynamic";
+
 export default function PendingPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">

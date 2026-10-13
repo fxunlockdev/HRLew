@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0002_core_entities.sql
+-- 0003_core_entities.sql
 -- Candidates, clients, jobs, BD leads, staff, settings catalogs.
 -- ============================================================================
 
@@ -41,6 +41,10 @@ create table if not exists public.clients (
   display_id text not null default ('CL-' || lpad(nextval('public.seq_client_display')::text, 6, '0')),
   name text not null,
   website text,
+  -- logo_url holds either an external image URL or an object key in the
+  -- Railway bucket (resolved by CompanyLogo / /api/files).
+  logo_url text,
+  logo_file_name text,
   industry text,
   company_size text,
   location text,

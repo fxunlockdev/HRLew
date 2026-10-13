@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { ilikeContains } from "@/lib/db/sql-helpers";
+import { orNull, parseFormData, toStringArray } from "@/lib/form";
 
 const candidateSchema = z.object({
   full_name: z.string().min(2, "Name is required"),
@@ -30,113 +32,89 @@ const candidateSchema = z.object({
   notes: z.string().optional(),
 });
 
-function parseFormData(formData: FormData) {
-  const raw = Object.fromEntries(formData.entries()) as Record<string, string>;
-  Object.keys(raw).forEach((k) => {
-    if (raw[k] === "") delete raw[k];
-  });
-  return raw;
-}
+type CandidateInput = z.infer<typeof candidateSchema>;
 
-function normalizeSkills(input: string | undefined): string[] {
-  if (!input) return [];
-  return input
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+function candidateColumns(parsed: CandidateInput) {
+  return {
+    full_name: parsed.full_name,
+    email: orNull(parsed.email),
+    phone: orNull(parsed.phone),
+    current_company: orNull(parsed.current_company),
+    current_designation: orNull(parsed.current_designation),
+    current_location: orNull(parsed.current_location),
+    preferred_location: orNull(parsed.preferred_location),
+    total_experience_years: orNull(parsed.total_experience_years),
+    relevant_experience_years: orNull(parsed.relevant_experience_years),
+    current_ctc: orNull(parsed.current_ctc),
+    expected_ctc: orNull(parsed.expected_ctc),
+    notice_period_days: orNull(parsed.notice_period_days),
+    last_working_day: orNull(parsed.last_working_day),
+    skills: toStringArray(parsed.skills),
+    industry: orNull(parsed.industry),
+    source: orNull(parsed.source),
+    linkedin_url: orNull(parsed.linkedin_url),
+    portfolio_url: orNull(parsed.portfolio_url),
+    notes: orNull(parsed.notes),
+  };
 }
 
 export async function createCandidate(formData: FormData) {
   const { profile } = await requireAuth();
   const parsed = candidateSchema.parse(parseFormData(formData));
-  const supabase = await getSupabaseServerClient();
 
-  if (parsed.email) {
-    const { data: dup } = await supabase
-      .from("candidates")
-      .select("id")
-      .eq("email", parsed.email)
-      .maybeSingle();
-    if (dup) throw new Error(`A candidate with email ${parsed.email} already exists.`);
-  }
+  const id = await withProfile(profile.id, async (trx) => {
+    if (parsed.email) {
+      const dup = await trx
+        .selectFrom("candidates")
+        .select("id")
+        .where("email", "=", parsed.email)
+        .executeTakeFirst();
+      if (dup) throw new Error(`A candidate with email ${parsed.email} already exists.`);
+    }
 
-  const { data, error } = await supabase
-    .from("candidates")
-    .insert({
-      full_name: parsed.full_name,
-      email: parsed.email,
-      phone: parsed.phone,
-      current_company: parsed.current_company,
-      current_designation: parsed.current_designation,
-      current_location: parsed.current_location,
-      preferred_location: parsed.preferred_location,
-      total_experience_years: parsed.total_experience_years,
-      relevant_experience_years: parsed.relevant_experience_years,
-      current_ctc: parsed.current_ctc,
-      expected_ctc: parsed.expected_ctc,
-      notice_period_days: parsed.notice_period_days,
-      last_working_day: parsed.last_working_day || null,
-      skills: normalizeSkills(parsed.skills),
-      industry: parsed.industry,
-      source: parsed.source,
-      linkedin_url: parsed.linkedin_url,
-      portfolio_url: parsed.portfolio_url,
-      status: parsed.status ?? "new",
-      assigned_recruiter_id: parsed.assigned_recruiter_id ?? profile.id,
-      notes: parsed.notes,
-      created_by: profile.id,
-    })
-    .select("id")
-    .single();
+    const row = await trx
+      .insertInto("candidates")
+      .values({
+        ...candidateColumns(parsed),
+        status: parsed.status ?? "new",
+        assigned_recruiter_id: parsed.assigned_recruiter_id ?? profile.id,
+        created_by: profile.id,
+      })
+      .returning("id")
+      .executeTakeFirstOrThrow();
 
-  if (error) throw new Error(error.message);
+    return row.id;
+  });
 
   revalidatePath("/candidates");
-  redirect(`/candidates/${data.id}`);
+  redirect(`/candidates/${id}`);
 }
 
 export async function updateCandidate(id: string, formData: FormData) {
-  await requireAuth();
+  const { profile } = await requireAuth();
   const parsed = candidateSchema.parse(parseFormData(formData));
-  const supabase = await getSupabaseServerClient();
 
-  const { error } = await supabase
-    .from("candidates")
-    .update({
-      full_name: parsed.full_name,
-      email: parsed.email,
-      phone: parsed.phone,
-      current_company: parsed.current_company,
-      current_designation: parsed.current_designation,
-      current_location: parsed.current_location,
-      preferred_location: parsed.preferred_location,
-      total_experience_years: parsed.total_experience_years,
-      relevant_experience_years: parsed.relevant_experience_years,
-      current_ctc: parsed.current_ctc,
-      expected_ctc: parsed.expected_ctc,
-      notice_period_days: parsed.notice_period_days,
-      last_working_day: parsed.last_working_day || null,
-      skills: normalizeSkills(parsed.skills),
-      industry: parsed.industry,
-      source: parsed.source,
-      linkedin_url: parsed.linkedin_url,
-      portfolio_url: parsed.portfolio_url,
-      status: parsed.status,
-      assigned_recruiter_id: parsed.assigned_recruiter_id,
-      notes: parsed.notes,
-    })
-    .eq("id", id);
+  await withProfile(profile.id, (trx) =>
+    trx
+      .updateTable("candidates")
+      .set({
+        ...candidateColumns(parsed),
+        status: parsed.status ?? "new",
+        assigned_recruiter_id: orNull(parsed.assigned_recruiter_id),
+      })
+      .where("id", "=", id)
+      .execute(),
+  );
 
-  if (error) throw new Error(error.message);
   revalidatePath(`/candidates/${id}`);
   revalidatePath("/candidates");
 }
 
 export async function deleteCandidate(id: string) {
-  await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const { error } = await supabase.from("candidates").delete().eq("id", id);
-  if (error) throw new Error(error.message);
+  const { profile } = await requireAuth();
+  await withProfile(profile.id, (trx) =>
+    trx.deleteFrom("candidates").where("id", "=", id).execute(),
+  );
   revalidatePath("/candidates");
   redirect("/candidates");
 }
@@ -144,11 +122,14 @@ export async function deleteCandidate(id: string) {
 export async function addCandidateNote(candidateId: string, body: string) {
   const { profile } = await requireAuth();
   if (!body.trim()) return;
-  const supabase = await getSupabaseServerClient();
-  const { error } = await supabase
-    .from("candidate_notes")
-    .insert({ candidate_id: candidateId, author_id: profile.id, body });
-  if (error) throw new Error(error.message);
+
+  await withProfile(profile.id, (trx) =>
+    trx
+      .insertInto("candidate_notes")
+      .values({ candidate_id: candidateId, author_id: profile.id, body })
+      .execute(),
+  );
+
   revalidatePath(`/candidates/${candidateId}`);
 }
 
@@ -160,23 +141,137 @@ export async function attachResume(
   size: number,
 ) {
   const { profile } = await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const { error: docErr } = await supabase.from("candidate_documents").insert({
-    candidate_id: candidateId,
-    uploaded_by: profile.id,
-    file_name: fileName,
-    storage_path: storagePath,
-    mime_type: mime,
-    size_bytes: size,
-    category: "resume",
-  });
-  if (docErr) throw new Error(docErr.message);
 
-  // Cache latest resume on the candidate row for convenience
-  await supabase
-    .from("candidates")
-    .update({ resume_file_name: fileName, resume_url: storagePath })
-    .eq("id", candidateId);
+  await withProfile(profile.id, async (trx) => {
+    await trx
+      .insertInto("candidate_documents")
+      .values({
+        candidate_id: candidateId,
+        uploaded_by: profile.id,
+        file_name: fileName,
+        storage_path: storagePath,
+        mime_type: mime,
+        size_bytes: size,
+        category: "resume",
+      })
+      .execute();
+
+    // Cache the latest resume on the candidate row for list views.
+    await trx
+      .updateTable("candidates")
+      .set({ resume_file_name: fileName, resume_url: storagePath })
+      .where("id", "=", candidateId)
+      .execute();
+  });
 
   revalidatePath(`/candidates/${candidateId}`);
+}
+
+/** Typeahead for the "submit candidate to job" panel. */
+export async function searchCandidates(term: string) {
+  const { profile } = await requireAuth();
+  const trimmed = term.trim();
+  if (trimmed.length < 2) return [];
+
+  return withProfile(profile.id, (trx) =>
+    trx
+      .selectFrom("candidates")
+      .select(["id", "full_name", "email", "current_company"])
+      .where((eb) =>
+        eb.or([
+          ilikeContains("full_name", trimmed),
+          ilikeContains("email", trimmed),
+        ]),
+      )
+      .orderBy("full_name", "asc")
+      .limit(20)
+      .execute(),
+  );
+}
+
+const importRowSchema = z.object({
+  full_name: z.string().min(2),
+  email: z.string().email().optional(),
+  phone: z.string().optional(),
+  current_company: z.string().optional(),
+  current_designation: z.string().optional(),
+  current_location: z.string().optional(),
+  total_experience_years: z.coerce.number().min(0).max(60).optional(),
+  current_ctc: z.coerce.number().min(0).optional(),
+  expected_ctc: z.coerce.number().min(0).optional(),
+  notice_period_days: z.coerce.number().int().min(0).max(365).optional(),
+  skills: z.string().optional(),
+  source: z.string().optional(),
+});
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  failures: string[];
+}
+
+/**
+ * Bulk CSV import. Runs server-side in one transaction — the Supabase version
+ * inserted row-by-row from the browser, so a mid-way failure left a partial
+ * import behind and every row cost a round trip.
+ */
+export async function importCandidates(rows: Record<string, string>[]): Promise<ImportResult> {
+  const { profile } = await requireAuth();
+
+  const MAX_ROWS = 5000;
+  if (rows.length > MAX_ROWS) {
+    throw new Error(`That file has ${rows.length} rows; the limit is ${MAX_ROWS}.`);
+  }
+
+  const result: ImportResult = { imported: 0, skipped: 0, failures: [] };
+
+  await withProfile(profile.id, async (trx) => {
+    for (const [index, raw] of rows.entries()) {
+      const line = index + 2; // header is line 1
+      const parsed = importRowSchema.safeParse(raw);
+      if (!parsed.success) {
+        result.failures.push(`Line ${line}: ${parsed.error.issues[0]?.message ?? "invalid row"}`);
+        continue;
+      }
+      const data = parsed.data;
+
+      if (data.email) {
+        const dup = await trx
+          .selectFrom("candidates")
+          .select("id")
+          .where("email", "=", data.email)
+          .executeTakeFirst();
+        if (dup) {
+          result.skipped += 1;
+          continue;
+        }
+      }
+
+      await trx
+        .insertInto("candidates")
+        .values({
+          full_name: data.full_name,
+          email: orNull(data.email),
+          phone: orNull(data.phone),
+          current_company: orNull(data.current_company),
+          current_designation: orNull(data.current_designation),
+          current_location: orNull(data.current_location),
+          total_experience_years: orNull(data.total_experience_years),
+          current_ctc: orNull(data.current_ctc),
+          expected_ctc: orNull(data.expected_ctc),
+          notice_period_days: orNull(data.notice_period_days),
+          skills: toStringArray(data.skills),
+          source: orNull(data.source),
+          status: "new",
+          assigned_recruiter_id: profile.id,
+          created_by: profile.id,
+        })
+        .execute();
+
+      result.imported += 1;
+    }
+  });
+
+  revalidatePath("/candidates");
+  return result;
 }

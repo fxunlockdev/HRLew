@@ -4,12 +4,14 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { orNull, parseFormData } from "@/lib/form";
 
 const clientSchema = z.object({
   name: z.string().min(2),
   website: z.string().url().optional().or(z.literal("").transform(() => undefined)),
-  logo_url: z.string().url().optional().or(z.literal("").transform(() => undefined)),
+  // Either an external image URL or an object key in the bucket.
+  logo_url: z.string().optional(),
   logo_file_name: z.string().optional(),
   industry: z.string().optional(),
   company_size: z.string().optional(),
@@ -23,6 +25,8 @@ const clientSchema = z.object({
   notes: z.string().optional(),
 });
 
+type ClientInput = z.infer<typeof clientSchema>;
+
 const contactSchema = z.object({
   client_id: z.string().uuid(),
   name: z.string().min(2),
@@ -32,63 +36,102 @@ const contactSchema = z.object({
   is_primary: z.coerce.boolean().optional(),
 });
 
-function parseFormData(formData: FormData) {
-  const raw = Object.fromEntries(formData.entries()) as Record<string, string>;
-  Object.keys(raw).forEach((k) => {
-    if (raw[k] === "") delete raw[k];
-  });
-  return raw;
+function clientColumns(parsed: ClientInput) {
+  return {
+    name: parsed.name,
+    website: orNull(parsed.website),
+    logo_url: orNull(parsed.logo_url),
+    logo_file_name: orNull(parsed.logo_file_name),
+    industry: orNull(parsed.industry),
+    company_size: orNull(parsed.company_size),
+    location: orNull(parsed.location),
+    account_owner_id: orNull(parsed.account_owner_id),
+    contract_type: orNull(parsed.contract_type),
+    commercial_terms: orNull(parsed.commercial_terms),
+    replacement_period_days: orNull(parsed.replacement_period_days),
+    payment_terms_days: orNull(parsed.payment_terms_days),
+    notes: orNull(parsed.notes),
+  };
 }
 
 export async function createClient(formData: FormData) {
   const { profile } = await requireAuth();
   const parsed = clientSchema.parse(parseFormData(formData));
-  const supabase = await getSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("clients")
-    .insert({ ...parsed, created_by: profile.id })
-    .select("id")
-    .single();
-  if (error) throw new Error(error.message);
+
+  const id = await withProfile(profile.id, async (trx) => {
+    const row = await trx
+      .insertInto("clients")
+      .values({
+        ...clientColumns(parsed),
+        status: parsed.status ?? "prospect",
+        created_by: profile.id,
+      })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    return row.id;
+  });
+
   revalidatePath("/clients");
-  redirect(`/clients/${data.id}`);
+  redirect(`/clients/${id}`);
 }
 
 export async function updateClient(id: string, formData: FormData) {
-  await requireAuth();
+  const { profile } = await requireAuth();
   const parsed = clientSchema.parse(parseFormData(formData));
-  const supabase = await getSupabaseServerClient();
-  const { error } = await supabase.from("clients").update(parsed).eq("id", id);
-  if (error) throw new Error(error.message);
+
+  await withProfile(profile.id, (trx) =>
+    trx
+      .updateTable("clients")
+      .set({
+        ...clientColumns(parsed),
+        status: parsed.status ?? "prospect",
+      })
+      .where("id", "=", id)
+      .execute(),
+  );
+
   revalidatePath(`/clients/${id}`);
   revalidatePath("/clients");
 }
 
 export async function deleteClient(id: string) {
-  await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const { error } = await supabase.from("clients").delete().eq("id", id);
-  if (error) throw new Error(error.message);
+  const { profile } = await requireAuth();
+  await withProfile(profile.id, (trx) => trx.deleteFrom("clients").where("id", "=", id).execute());
   revalidatePath("/clients");
   redirect("/clients");
 }
 
 export async function addClientContact(formData: FormData) {
-  await requireAuth();
+  const { profile } = await requireAuth();
   const parsed = contactSchema.parse(parseFormData(formData));
-  const supabase = await getSupabaseServerClient();
-  const { error } = await supabase.from("client_contacts").insert(parsed);
-  if (error) throw new Error(error.message);
+
+  await withProfile(profile.id, (trx) =>
+    trx
+      .insertInto("client_contacts")
+      .values({
+        client_id: parsed.client_id,
+        name: parsed.name,
+        designation: orNull(parsed.designation),
+        email: orNull(parsed.email),
+        phone: orNull(parsed.phone),
+        is_primary: parsed.is_primary ?? false,
+      })
+      .execute(),
+  );
+
   revalidatePath(`/clients/${parsed.client_id}`);
 }
 
 export async function addClientNote(clientId: string, body: string) {
   const { profile } = await requireAuth();
   if (!body.trim()) return;
-  const supabase = await getSupabaseServerClient();
-  const { error } = await supabase
-    .from("client_notes")
-    .insert({ client_id: clientId, author_id: profile.id, body });
-  if (error) throw new Error(error.message);
+
+  await withProfile(profile.id, (trx) =>
+    trx
+      .insertInto("client_notes")
+      .values({ client_id: clientId, author_id: profile.id, body })
+      .execute(),
+  );
+
   revalidatePath(`/clients/${clientId}`);
 }

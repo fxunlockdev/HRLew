@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,20 +13,45 @@ import { formatCurrency, formatDate, relativeTime } from "@/lib/utils";
 
 export default async function BdLeadDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const { data: lead } = await supabase
-    .from("bd_leads")
-    .select("*, owner:profiles!bd_leads_owner_id_fkey(full_name)")
-    .eq("id", id)
-    .maybeSingle();
-  if (!lead) notFound();
+  const { profile } = await requireAuth();
 
-  const { data: activities } = await supabase
-    .from("bd_activities")
-    .select("*, author:profiles!bd_activities_author_id_fkey(full_name)")
-    .eq("lead_id", id)
-    .order("occurred_at", { ascending: false });
+  const data = await withProfile(profile.id, async (trx) => {
+    const lead = await trx
+      .selectFrom("bd_leads")
+      .selectAll("bd_leads")
+      .select((eb) => [
+        jsonObjectFrom(
+          eb
+            .selectFrom("profiles")
+            .select("profiles.full_name")
+            .whereRef("profiles.id", "=", "bd_leads.owner_id"),
+        ).as("owner"),
+      ])
+      .where("bd_leads.id", "=", id)
+      .executeTakeFirst();
+    if (!lead) return null;
+
+    return {
+      lead,
+      activities: await trx
+        .selectFrom("bd_activities")
+        .selectAll("bd_activities")
+        .select((eb) => [
+          jsonObjectFrom(
+            eb
+              .selectFrom("profiles")
+              .select("profiles.full_name")
+              .whereRef("profiles.id", "=", "bd_activities.author_id"),
+          ).as("author"),
+        ])
+        .where("lead_id", "=", id)
+        .orderBy("occurred_at", "desc")
+        .execute(),
+    };
+  });
+
+  if (!data) notFound();
+  const { lead, activities } = data;
 
   return (
     <>

@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0003_pipeline_interviews_placements.sql
+-- 0004_pipeline_interviews_placements.sql
 -- Candidate-job pipeline, stage history, interviews, placements.
 -- ============================================================================
 
@@ -62,7 +62,7 @@ as $$
 declare
   v_actor uuid;
 begin
-  select id into v_actor from public.profiles where auth_user_id = auth.uid();
+  v_actor := public.current_profile_id();
 
   if (tg_op = 'INSERT') then
     insert into public.pipeline_stage_history (pipeline_id, from_stage, to_stage, changed_by)

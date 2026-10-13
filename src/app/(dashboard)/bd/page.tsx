@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
 import { requireAuth } from "@/lib/auth";
 import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
@@ -12,15 +13,30 @@ export const metadata = { title: "Business Development · HR OS" };
 
 export default async function BdPage() {
   const { profile, permissions } = await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const [stages, { data: leads }] = await Promise.all([
-    getSettingsList("bd_stage"),
-    supabase
-      .from("bd_leads")
-      .select("id, company_name, contact_name, owner_id, stage, expected_value, next_follow_up_at, created_at, owner:profiles!bd_leads_owner_id_fkey(full_name)")
-      .order("created_at", { ascending: false })
-      .limit(500),
-  ]);
+  const { stages, leads } = await withProfile(profile.id, async (trx) => ({
+    stages: await getSettingsList(trx, "bd_stage"),
+    leads: await trx
+      .selectFrom("bd_leads")
+      .select((eb) => [
+        "id",
+        "company_name",
+        "contact_name",
+        "owner_id",
+        "stage",
+        "expected_value",
+        "next_follow_up_at",
+        "created_at",
+        jsonObjectFrom(
+          eb
+            .selectFrom("profiles")
+            .select("profiles.full_name")
+            .whereRef("profiles.id", "=", "bd_leads.owner_id"),
+        ).as("owner"),
+      ])
+      .orderBy("created_at", "desc")
+      .limit(500)
+      .execute(),
+  }));
 
   return (
     <>
@@ -35,7 +51,7 @@ export default async function BdPage() {
           )
         }
       />
-      <BdKanban rows={(leads ?? []) as any} stages={stages} />
+      <BdKanban rows={leads} stages={stages} />
     </>
   );
 }

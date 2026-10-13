@@ -1,29 +1,60 @@
 import { requirePermission } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
+import { hasPermission } from "@/lib/rbac";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserRoleEditor } from "@/components/permissions/user-role-editor";
 import { RolePermissionMatrix } from "@/components/permissions/role-permission-matrix";
+import { CreateUserForm } from "@/components/permissions/create-user-form";
 
 export const metadata = { title: "Permissions · HR OS" };
 
 export default async function PermissionsPage() {
-  await requirePermission("rbac", "view");
-  const supabase = await getSupabaseServerClient();
-  const [
-    { data: profiles },
-    { data: roles },
-    { data: permissions },
-    { data: rolePerms },
-  ] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("id, full_name, email, status, role_id, last_seen_at, created_at, role:roles(id, name)")
-      .order("created_at", { ascending: false }),
-    supabase.from("roles").select("id, name, description").order("name"),
-    supabase.from("permissions").select("id, module, action, description").order("module").order("action"),
-    supabase.from("role_permissions").select("role_id, permission_id"),
-  ]);
+  const ctx = await requirePermission("rbac", "view");
+  const canManage =
+    hasPermission(ctx.profile, ctx.permissions, "rbac", "manage") ||
+    ctx.profile.role?.name === "admin";
+
+  const { profiles, roles, permissions, rolePerms } = await withProfile(
+    ctx.profile.id,
+    async (trx) => ({
+      profiles: await trx
+        .selectFrom("profiles")
+        .select((eb) => [
+          "profiles.id",
+          "profiles.full_name",
+          "profiles.email",
+          "profiles.status",
+          "profiles.role_id",
+          "profiles.last_seen_at",
+          "profiles.created_at",
+          jsonObjectFrom(
+            eb
+              .selectFrom("roles")
+              .select(["roles.id", "roles.name"])
+              .whereRef("roles.id", "=", "profiles.role_id"),
+          ).as("role"),
+        ])
+        .orderBy("profiles.created_at", "desc")
+        .execute(),
+      roles: await trx
+        .selectFrom("roles")
+        .select(["id", "name", "description"])
+        .orderBy("name", "asc")
+        .execute(),
+      permissions: await trx
+        .selectFrom("permissions")
+        .select(["id", "module", "action", "description"])
+        .orderBy("module", "asc")
+        .orderBy("action", "asc")
+        .execute(),
+      rolePerms: await trx
+        .selectFrom("role_permissions")
+        .select(["role_id", "permission_id"])
+        .execute(),
+    }),
+  );
 
   return (
     <>
@@ -33,18 +64,15 @@ export default async function PermissionsPage() {
       />
       <Tabs defaultValue="users">
         <TabsList>
-          <TabsTrigger value="users">Users ({profiles?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="users">Users ({profiles.length})</TabsTrigger>
           <TabsTrigger value="matrix">Role × Permission matrix</TabsTrigger>
         </TabsList>
-        <TabsContent value="users">
-          <UserRoleEditor profiles={(profiles ?? []) as any} roles={(roles ?? []) as any} />
+        <TabsContent value="users" className="space-y-4">
+          {canManage && <CreateUserForm roles={roles} />}
+          <UserRoleEditor profiles={profiles} roles={roles} canManage={canManage} />
         </TabsContent>
         <TabsContent value="matrix">
-          <RolePermissionMatrix
-            roles={(roles ?? []) as any}
-            permissions={(permissions ?? []) as any}
-            grants={(rolePerms ?? []) as any}
-          />
+          <RolePermissionMatrix roles={roles} permissions={permissions} grants={rolePerms} />
         </TabsContent>
       </Tabs>
     </>

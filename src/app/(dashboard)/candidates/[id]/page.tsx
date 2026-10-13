@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
 import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -25,44 +26,111 @@ interface Props {
 export default async function CandidateDetailPage({ params }: Props) {
   const { id } = await params;
   const { profile, permissions } = await requireAuth();
-  const supabase = await getSupabaseServerClient();
 
-  const { data: candidate } = await supabase
-    .from("candidates")
-    .select("*, recruiter:profiles!candidates_assigned_recruiter_id_fkey(id, full_name)")
-    .eq("id", id)
-    .maybeSingle();
+  const data = await withProfile(profile.id, async (trx) => {
+    const candidate = await trx
+      .selectFrom("candidates")
+      .selectAll("candidates")
+      .select((eb) => [
+        jsonObjectFrom(
+          eb
+            .selectFrom("profiles")
+            .select(["profiles.id", "profiles.full_name"])
+            .whereRef("profiles.id", "=", "candidates.assigned_recruiter_id"),
+        ).as("recruiter"),
+      ])
+      .where("candidates.id", "=", id)
+      .executeTakeFirst();
 
-  if (!candidate) notFound();
+    if (!candidate) return null;
 
-  const [statuses, sources, { data: recruiters }, { data: notes }, { data: pipeline }, { data: docs }, { data: activity }] =
-    await Promise.all([
-      getSettingsList("candidate_status"),
-      getSettingsList("candidate_source"),
-      supabase.from("profiles").select("id, full_name").eq("status", "active").order("full_name"),
-      supabase
-        .from("candidate_notes")
-        .select("id, body, created_at, author:profiles!candidate_notes_author_id_fkey(full_name)")
-        .eq("candidate_id", id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("candidate_job_pipeline")
-        .select("id, current_stage, submitted_at, last_activity_at, offer_amount, job:job_requirements(id, title), client:clients(name)")
-        .eq("candidate_id", id)
-        .order("last_activity_at", { ascending: false }),
-      supabase
-        .from("candidate_documents")
-        .select("id, file_name, storage_path, mime_type, size_bytes, category, created_at")
-        .eq("candidate_id", id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("activity_logs")
-        .select("id, action, created_at, actor:profiles!activity_logs_actor_id_fkey(full_name)")
-        .eq("entity_type", "candidates")
-        .eq("entity_id", id)
-        .order("created_at", { ascending: false })
-        .limit(20),
-    ]);
+    return {
+      candidate,
+      statuses: await getSettingsList(trx, "candidate_status"),
+      sources: await getSettingsList(trx, "candidate_source"),
+      recruiters: await trx
+        .selectFrom("profiles")
+        .select(["id", "full_name"])
+        .where("status", "=", "active")
+        .orderBy("full_name", "asc")
+        .execute(),
+      notes: await trx
+        .selectFrom("candidate_notes")
+        .select((eb) => [
+          "candidate_notes.id",
+          "candidate_notes.body",
+          "candidate_notes.created_at",
+          jsonObjectFrom(
+            eb
+              .selectFrom("profiles")
+              .select("profiles.full_name")
+              .whereRef("profiles.id", "=", "candidate_notes.author_id"),
+          ).as("author"),
+        ])
+        .where("candidate_id", "=", id)
+        .orderBy("created_at", "desc")
+        .execute(),
+      pipeline: await trx
+        .selectFrom("candidate_job_pipeline")
+        .select((eb) => [
+          "candidate_job_pipeline.id",
+          "candidate_job_pipeline.current_stage",
+          "candidate_job_pipeline.submitted_at",
+          "candidate_job_pipeline.last_activity_at",
+          "candidate_job_pipeline.offer_amount",
+          jsonObjectFrom(
+            eb
+              .selectFrom("job_requirements")
+              .select(["job_requirements.id", "job_requirements.title"])
+              .whereRef("job_requirements.id", "=", "candidate_job_pipeline.job_id"),
+          ).as("job"),
+          jsonObjectFrom(
+            eb
+              .selectFrom("clients")
+              .select("clients.name")
+              .whereRef("clients.id", "=", "candidate_job_pipeline.client_id"),
+          ).as("client"),
+        ])
+        .where("candidate_id", "=", id)
+        .orderBy("last_activity_at", "desc")
+        .execute(),
+      docs: await trx
+        .selectFrom("candidate_documents")
+        .select([
+          "id",
+          "file_name",
+          "storage_path",
+          "mime_type",
+          "size_bytes",
+          "category",
+          "created_at",
+        ])
+        .where("candidate_id", "=", id)
+        .orderBy("created_at", "desc")
+        .execute(),
+      activity: await trx
+        .selectFrom("activity_logs")
+        .select((eb) => [
+          "activity_logs.id",
+          "activity_logs.action",
+          "activity_logs.created_at",
+          jsonObjectFrom(
+            eb
+              .selectFrom("profiles")
+              .select("profiles.full_name")
+              .whereRef("profiles.id", "=", "activity_logs.actor_id"),
+          ).as("actor"),
+        ])
+        .where("entity_type", "=", "candidates")
+        .where("entity_id", "=", id)
+        .orderBy("created_at", "desc")
+        .limit(20)
+        .execute(),
+    };
+  });
+
+  if (!data) notFound();
+  const { candidate, statuses, sources, recruiters, notes, pipeline, docs, activity } = data;
 
   const status = statuses.find((s) => s.value === candidate.status);
   const canViewCtc = hasPermission(profile, permissions, "candidates", "view_sensitive");
@@ -139,39 +207,39 @@ export default async function CandidateDetailPage({ params }: Props) {
         <div className="space-y-4">
           <Tabs defaultValue="pipeline">
             <TabsList>
-              <TabsTrigger value="pipeline">Pipeline ({pipeline?.length ?? 0})</TabsTrigger>
-              <TabsTrigger value="notes">Notes ({notes?.length ?? 0})</TabsTrigger>
+              <TabsTrigger value="pipeline">Pipeline ({pipeline.length})</TabsTrigger>
+              <TabsTrigger value="notes">Notes ({notes.length})</TabsTrigger>
               <TabsTrigger value="resume">Resume</TabsTrigger>
               <TabsTrigger value="edit" disabled={!canEdit}>Edit</TabsTrigger>
               <TabsTrigger value="activity">Activity</TabsTrigger>
             </TabsList>
 
             <TabsContent value="pipeline">
-              <CandidatePipelineList rows={(pipeline ?? []) as any} />
+              <CandidatePipelineList rows={pipeline} />
             </TabsContent>
 
             <TabsContent value="notes">
-              <CandidateNotes candidateId={candidate.id} notes={(notes ?? []) as any} />
+              <CandidateNotes candidateId={candidate.id} notes={notes} />
             </TabsContent>
 
             <TabsContent value="resume">
-              <CandidateResume candidate={candidate as any} documents={(docs ?? []) as any} />
+              <CandidateResume candidate={candidate} documents={docs} />
             </TabsContent>
 
             <TabsContent value="edit">
               {canEdit && (
                 <CandidateForm
                   mode="edit"
-                  candidate={candidate as any}
+                  candidate={candidate}
                   statuses={statuses}
                   sources={sources}
-                  recruiters={recruiters ?? []}
+                  recruiters={recruiters}
                 />
               )}
             </TabsContent>
 
             <TabsContent value="activity">
-              <CandidateActivity rows={(activity ?? []) as any} />
+              <CandidateActivity rows={activity} />
             </TabsContent>
           </Tabs>
         </div>

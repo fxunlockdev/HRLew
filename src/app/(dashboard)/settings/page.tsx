@@ -1,5 +1,5 @@
 import { requirePermission } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SettingsListEditor } from "@/components/settings/settings-list-editor";
@@ -19,9 +19,11 @@ const LISTS = [
 ];
 
 export default async function SettingsPage() {
-  await requirePermission("settings", "view");
-  const supabase = await getSupabaseServerClient();
-  const { data: rows } = await supabase.from("settings_lists").select("*").order("sort_order");
+  const { profile } = await requirePermission("settings", "view");
+
+  const rows = await withProfile(profile.id, (trx) =>
+    trx.selectFrom("settings_lists").selectAll().orderBy("sort_order", "asc").execute(),
+  );
 
   return (
     <>
@@ -36,7 +38,7 @@ export default async function SettingsPage() {
           <TabsContent key={l.key} value={l.key}>
             <SettingsListEditor
               listKey={l.key}
-              rows={(rows ?? []).filter((r: any) => r.list_key === l.key) as any}
+              rows={rows.filter((r) => r.list_key === l.key)}
             />
           </TabsContent>
         ))}

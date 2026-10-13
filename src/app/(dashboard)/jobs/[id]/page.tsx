@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
 import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -19,30 +20,72 @@ import { hasPermission } from "@/lib/rbac";
 export default async function JobDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { profile, permissions } = await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const { data: job } = await supabase
-    .from("job_requirements")
-    .select("*, client:clients(id, name, logo_url)")
-    .eq("id", id)
-    .maybeSingle();
-  if (!job) notFound();
+  const data = await withProfile(profile.id, async (trx) => {
+    const job = await trx
+      .selectFrom("job_requirements")
+      .selectAll("job_requirements")
+      .select((eb) => [
+        jsonObjectFrom(
+          eb
+            .selectFrom("clients")
+            .select(["clients.id", "clients.name", "clients.logo_url"])
+            .whereRef("clients.id", "=", "job_requirements.client_id"),
+        ).as("client"),
+      ])
+      .where("job_requirements.id", "=", id)
+      .executeTakeFirst();
+    if (!job) return null;
 
-  const [statuses, pipelineStages, { data: clients }, { data: pipeline }, { data: interviews }] = await Promise.all([
-    getSettingsList("job_status"),
-    getSettingsList("pipeline_stage"),
-    supabase.from("clients").select("id, name").order("name"),
-    supabase
-      .from("candidate_job_pipeline")
-      .select("id, current_stage, last_activity_at, submitted_at, candidate:candidates(id, full_name, email, expected_ctc, total_experience_years)")
-      .eq("job_id", id)
-      .order("last_activity_at", { ascending: false }),
-    supabase
-      .from("interviews")
-      .select("id, scheduled_at, status, candidate:candidates(full_name)")
-      .eq("job_id", id)
-      .order("scheduled_at", { ascending: false })
-      .limit(20),
-  ]);
+    return {
+      job,
+      statuses: await getSettingsList(trx, "job_status"),
+      pipelineStages: await getSettingsList(trx, "pipeline_stage"),
+      clients: await trx.selectFrom("clients").select(["id", "name"]).orderBy("name", "asc").execute(),
+      pipeline: await trx
+        .selectFrom("candidate_job_pipeline")
+        .select((eb) => [
+          "candidate_job_pipeline.id",
+          "candidate_job_pipeline.current_stage",
+          "candidate_job_pipeline.last_activity_at",
+          "candidate_job_pipeline.submitted_at",
+          jsonObjectFrom(
+            eb
+              .selectFrom("candidates")
+              .select([
+                "candidates.id",
+                "candidates.full_name",
+                "candidates.email",
+                "candidates.expected_ctc",
+                "candidates.total_experience_years",
+              ])
+              .whereRef("candidates.id", "=", "candidate_job_pipeline.candidate_id"),
+          ).as("candidate"),
+        ])
+        .where("job_id", "=", id)
+        .orderBy("last_activity_at", "desc")
+        .execute(),
+      interviews: await trx
+        .selectFrom("interviews")
+        .select((eb) => [
+          "interviews.id",
+          "interviews.scheduled_at",
+          "interviews.status",
+          jsonObjectFrom(
+            eb
+              .selectFrom("candidates")
+              .select("candidates.full_name")
+              .whereRef("candidates.id", "=", "interviews.candidate_id"),
+          ).as("candidate"),
+        ])
+        .where("job_id", "=", id)
+        .orderBy("scheduled_at", "desc")
+        .limit(20)
+        .execute(),
+    };
+  });
+
+  if (!data) notFound();
+  const { job, statuses, pipelineStages, clients, pipeline, interviews } = data;
 
   const stat = statuses.find((s) => s.value === job.status);
   const canViewSalary = hasPermission(profile, permissions, "jobs", "view_salary") || profile.role?.name === "admin" || profile.role?.name === "manager";

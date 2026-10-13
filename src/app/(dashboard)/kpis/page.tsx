@@ -1,4 +1,5 @@
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile, type Tx } from "@/lib/db";
+import { sql } from "kysely";
 import { requireAuth } from "@/lib/auth";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,95 +26,98 @@ interface RecruiterKpi {
 
 export default async function KpisPage() {
   const { profile, permissions } = await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const canViewRevenue = hasPermission(profile, permissions, "kpi", "view_company") || profile.role?.name === "admin" || profile.role?.name === "manager";
+  const canViewRevenue =
+    hasPermission(profile, permissions, "kpi", "view_company") ||
+    profile.role?.name === "admin" ||
+    profile.role?.name === "manager";
 
   const since = new Date();
   since.setDate(since.getDate() - 30);
   const sinceIso = since.toISOString();
-
-  const [
-    { count: candidatesAdded },
-    { count: candidatesSubmitted },
-    { count: interviewsScheduled },
-    { count: offers },
-    { count: joinings },
-    { data: placementsRevenue },
-    { data: profiles },
-    { data: candidatesByRecruiter },
-    { data: submissionsByRecruiter },
-    { data: interviewsByRecruiter },
-    { data: placementsByRecruiter },
-  ] = await Promise.all([
-    supabase.from("candidates").select("*", { count: "exact", head: true }).gte("created_at", sinceIso),
-    supabase.from("candidate_job_pipeline").select("*", { count: "exact", head: true }).gte("submitted_at", sinceIso),
-    supabase.from("interviews").select("*", { count: "exact", head: true }).gte("created_at", sinceIso),
-    supabase.from("candidate_job_pipeline").select("*", { count: "exact", head: true }).eq("current_stage", "offer_released"),
-    supabase.from("placements").select("*", { count: "exact", head: true }).gte("joining_date", since.toISOString().slice(0, 10)),
-    supabase.from("placements").select("placement_revenue").gte("joining_date", since.toISOString().slice(0, 10)),
-    supabase.from("profiles").select("id, full_name").eq("status", "active"),
-    supabase.from("candidates").select("assigned_recruiter_id").gte("created_at", sinceIso),
-    supabase.from("candidate_job_pipeline").select("assigned_recruiter_id").gte("submitted_at", sinceIso),
-    supabase.from("interviews").select("scheduled_by").gte("created_at", sinceIso),
-    supabase.from("placements").select("recruiter_id, placement_revenue").gte("created_at", sinceIso),
-  ]);
-
-  const revenue = placementsRevenue?.reduce((s, p: any) => s + (p.placement_revenue ?? 0), 0) ?? 0;
-
-  // Aggregate per recruiter
-  const byRecruiter = new Map<string, RecruiterKpi>();
-  profiles?.forEach((p) => {
-    byRecruiter.set(p.id, {
-      recruiter_id: p.id,
-      name: p.full_name ?? "—",
-      candidates_added: 0,
-      submissions: 0,
-      interviews: 0,
-      offers: 0,
-      placements: 0,
-      revenue: 0,
-    });
-  });
-  candidatesByRecruiter?.forEach((c: any) => {
-    if (!c.assigned_recruiter_id) return;
-    const k = byRecruiter.get(c.assigned_recruiter_id);
-    if (k) k.candidates_added += 1;
-  });
-  submissionsByRecruiter?.forEach((s: any) => {
-    if (!s.assigned_recruiter_id) return;
-    const k = byRecruiter.get(s.assigned_recruiter_id);
-    if (k) k.submissions += 1;
-  });
-  interviewsByRecruiter?.forEach((i: any) => {
-    if (!i.scheduled_by) return;
-    const k = byRecruiter.get(i.scheduled_by);
-    if (k) k.interviews += 1;
-  });
-  placementsByRecruiter?.forEach((p: any) => {
-    if (!p.recruiter_id) return;
-    const k = byRecruiter.get(p.recruiter_id);
-    if (k) {
-      k.placements += 1;
-      k.revenue += p.placement_revenue ?? 0;
-    }
-  });
-  const recruiterRows = Array.from(byRecruiter.values()).sort((a, b) => b.placements - a.placements);
-
-  // ---- Staff KPI targets vs actuals (current month) ----
+  const sinceDate = sinceIso.slice(0, 10);
   const periodStart = currentPeriodStart();
   const monthIso = new Date(periodStart).toISOString();
-  const [{ data: staffRows }, { data: targetRows }, monthActuals] = await Promise.all([
-    supabase.from("staff").select("id, full_name, profile_id").neq("employment_status", "ex_employee"),
-    supabase
-      .from("kpi_targets")
-      .select("staff_id, metric_key, target_value")
-      .eq("period", KPI_PERIOD)
-      .eq("period_start", periodStart),
-    computeRecruiterActuals(supabase, monthIso),
-  ]);
+
+  /** Headline totals for the last 30 days, counted in the database. */
+  async function loadTotals(trx: Tx) {
+    const result = await sql<{
+      candidates_added: number;
+      candidates_submitted: number;
+      interviews_scheduled: number;
+      offers: number;
+      joinings: number;
+      revenue: number;
+    }>`
+      select
+        (select count(*)::int from candidates where created_at >= ${sinceIso}) as candidates_added,
+        (select count(*)::int from candidate_job_pipeline
+          where submitted_at >= ${sinceIso}) as candidates_submitted,
+        (select count(*)::int from interviews where created_at >= ${sinceIso}) as interviews_scheduled,
+        (select count(*)::int from candidate_job_pipeline
+          where current_stage = 'offer_released') as offers,
+        (select count(*)::int from placements where joining_date >= ${sinceDate}::date) as joinings,
+        (select coalesce(sum(placement_revenue), 0)::float8 from placements
+          where joining_date >= ${sinceDate}::date) as revenue
+    `.execute(trx);
+    return result.rows[0];
+  }
+
+  const { totals, recruiterRows, staffRows, targetRows, monthActuals } = await withProfile(
+    profile.id,
+    async (trx) => {
+      const perRecruiter = await computeRecruiterActuals(trx, sinceIso, "created_at");
+      const activeProfiles = await trx
+        .selectFrom("profiles")
+        .select(["id", "full_name"])
+        .where("status", "=", "active")
+        .execute();
+
+      // Offers are not per-recruiter in the source data, so they stay at zero
+      // here exactly as they did before.
+      const rows: RecruiterKpi[] = activeProfiles
+        .map((prof) => {
+          const actuals = perRecruiter.get(prof.id) ?? zeroActuals();
+          return {
+            recruiter_id: prof.id,
+            name: prof.full_name ?? "—",
+            candidates_added: actuals.candidates_added,
+            submissions: actuals.submissions,
+            interviews: actuals.interviews,
+            offers: 0,
+            placements: actuals.placements,
+            revenue: actuals.revenue,
+          };
+        })
+        .sort((a, b) => b.placements - a.placements);
+
+      return {
+        totals: await loadTotals(trx),
+        recruiterRows: rows,
+        staffRows: await trx
+          .selectFrom("staff")
+          .select(["id", "full_name", "profile_id"])
+          .where("employment_status", "!=", "ex_employee")
+          .execute(),
+        targetRows: await trx
+          .selectFrom("kpi_targets")
+          .select(["staff_id", "metric_key", "target_value"])
+          .where("period", "=", KPI_PERIOD)
+          .where("period_start", "=", periodStart)
+          .execute(),
+        monthActuals: await computeRecruiterActuals(trx, monthIso),
+      };
+    },
+  );
+
+  const candidatesAdded = totals?.candidates_added ?? 0;
+  const candidatesSubmitted = totals?.candidates_submitted ?? 0;
+  const interviewsScheduled = totals?.interviews_scheduled ?? 0;
+  const offers = totals?.offers ?? 0;
+  const joinings = totals?.joinings ?? 0;
+  const revenue = totals?.revenue ?? 0;
 
   const targetsByStaff = new Map<string, Map<string, number>>();
-  targetRows?.forEach((t: { staff_id: string; metric_key: string; target_value: number }) => {
+  targetRows.forEach((t) => {
     const m = targetsByStaff.get(t.staff_id) ?? new Map<string, number>();
     m.set(t.metric_key, Number(t.target_value));
     targetsByStaff.set(t.staff_id, m);
@@ -128,9 +132,9 @@ export default async function KpisPage() {
     pct: number;
   }
   const attainmentRows: AttainRow[] = [];
-  (staffRows ?? [])
-    .filter((s: { id: string }) => targetsByStaff.has(s.id))
-    .forEach((s: { id: string; full_name: string; profile_id: string | null }) => {
+  staffRows
+    .filter((s) => targetsByStaff.has(s.id))
+    .forEach((s) => {
       const tmap = targetsByStaff.get(s.id)!;
       const actuals = (s.profile_id && monthActuals.get(s.profile_id)) || zeroActuals();
       KPI_METRICS.forEach((m) => {

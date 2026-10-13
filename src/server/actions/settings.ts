@@ -2,37 +2,78 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { invalidateSettingsCache } from "@/lib/settings";
 
 export async function upsertSettingsListItem(formData: FormData) {
-  await requirePermission("settings", "manage");
-  const list_key = String(formData.get("list_key") ?? "");
+  const { profile } = await requirePermission("settings", "manage");
+
+  const listKey = String(formData.get("list_key") ?? "");
   const value = String(formData.get("value") ?? "").trim();
   const label = String(formData.get("label") ?? "").trim();
-  const sort_order = Number(formData.get("sort_order") ?? 0);
+  const sortOrder = Number(formData.get("sort_order") ?? 0);
   const color = (formData.get("color") as string) || null;
-  if (!list_key || !value || !label) throw new Error("list_key, value, and label are required");
+  if (!listKey || !value || !label) throw new Error("list_key, value, and label are required");
 
-  const supabase = await getSupabaseServerClient();
-  const { error } = await supabase
-    .from("settings_lists")
-    .upsert({ list_key, value, label, sort_order, color, is_active: true }, { onConflict: "list_key,value" });
-  if (error) throw new Error(error.message);
+  await withProfile(profile.id, (trx) =>
+    trx
+      .insertInto("settings_lists")
+      .values({
+        list_key: listKey,
+        value,
+        label,
+        sort_order: Number.isFinite(sortOrder) ? sortOrder : 0,
+        color,
+        is_active: true,
+      })
+      .onConflict((oc) =>
+        oc.columns(["list_key", "value"]).doUpdateSet((eb) => ({
+          label: eb.ref("excluded.label"),
+          sort_order: eb.ref("excluded.sort_order"),
+          color: eb.ref("excluded.color"),
+          is_active: true,
+        })),
+      )
+      .execute(),
+  );
+
+  invalidateSettingsCache(listKey);
   revalidatePath("/settings");
 }
 
 export async function deactivateSettingsListItem(id: string) {
-  await requirePermission("settings", "manage");
-  const supabase = await getSupabaseServerClient();
-  const { error } = await supabase.from("settings_lists").update({ is_active: false }).eq("id", id).eq("is_system", false);
-  if (error) throw new Error(error.message);
+  const { profile } = await requirePermission("settings", "manage");
+
+  await withProfile(profile.id, (trx) =>
+    trx
+      .updateTable("settings_lists")
+      .set({ is_active: false })
+      .where("id", "=", id)
+      .where("is_system", "=", false)
+      .execute(),
+  );
+
+  invalidateSettingsCache();
   revalidatePath("/settings");
 }
 
 export async function updateUserRole(profileId: string, roleId: string | null, status: string) {
-  await requirePermission("rbac", "manage");
-  const supabase = await getSupabaseServerClient();
-  const { error } = await supabase.from("profiles").update({ role_id: roleId, status }).eq("id", profileId);
-  if (error) throw new Error(error.message);
+  const { profile } = await requirePermission("rbac", "manage");
+
+  if (!["pending", "active", "suspended", "archived"].includes(status)) {
+    throw new Error("Unknown status");
+  }
+
+  await withProfile(profile.id, (trx) =>
+    trx
+      .updateTable("profiles")
+      .set({
+        role_id: roleId,
+        status: status as "pending" | "active" | "suspended" | "archived",
+      })
+      .where("id", "=", profileId)
+      .execute(),
+  );
+
   revalidatePath("/permissions");
 }

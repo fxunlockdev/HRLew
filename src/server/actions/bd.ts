@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { orNull, parseFormData } from "@/lib/form";
 
 const leadSchema = z.object({
   company_name: z.string().min(2),
@@ -21,79 +22,115 @@ const leadSchema = z.object({
   notes: z.string().optional(),
 });
 
-function parseFormData(formData: FormData) {
-  const raw = Object.fromEntries(formData.entries()) as Record<string, string>;
-  Object.keys(raw).forEach((k) => {
-    if (raw[k] === "") delete raw[k];
-  });
-  return raw;
-}
-
 export async function createLead(formData: FormData) {
   const { profile } = await requireAuth();
   const parsed = leadSchema.parse(parseFormData(formData));
-  const supabase = await getSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("bd_leads")
-    .insert({
-      ...parsed,
-      owner_id: parsed.owner_id ?? profile.id,
-      next_follow_up_at: parsed.next_follow_up_at || null,
-      created_by: profile.id,
-    })
-    .select("id")
-    .single();
-  if (error) throw new Error(error.message);
+
+  const id = await withProfile(profile.id, async (trx) => {
+    const row = await trx
+      .insertInto("bd_leads")
+      .values({
+        company_name: parsed.company_name,
+        contact_name: orNull(parsed.contact_name),
+        contact_email: orNull(parsed.contact_email),
+        contact_phone: orNull(parsed.contact_phone),
+        linkedin_url: orNull(parsed.linkedin_url),
+        industry: orNull(parsed.industry),
+        source: orNull(parsed.source),
+        owner_id: parsed.owner_id ?? profile.id,
+        stage: parsed.stage ?? "new_lead",
+        expected_value: orNull(parsed.expected_value),
+        next_follow_up_at: orNull(parsed.next_follow_up_at),
+        notes: orNull(parsed.notes),
+        created_by: profile.id,
+      })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    return row.id;
+  });
+
   revalidatePath("/bd");
-  redirect(`/bd/${data.id}`);
+  redirect(`/bd/${id}`);
 }
 
 export async function updateLeadStage(leadId: string, stage: string) {
-  await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const { error } = await supabase.from("bd_leads").update({ stage }).eq("id", leadId);
-  if (error) throw new Error(error.message);
+  const { profile } = await requireAuth();
+
+  await withProfile(profile.id, (trx) =>
+    trx.updateTable("bd_leads").set({ stage }).where("id", "=", leadId).execute(),
+  );
+
   revalidatePath("/bd");
 }
+
+const activityTypeSchema = z
+  .enum(["call", "email", "meeting", "note", "proposal_sent", "other"])
+  .default("note");
 
 export async function addBdActivity(formData: FormData) {
   const { profile } = await requireAuth();
-  const lead_id = String(formData.get("lead_id") ?? "");
-  const activity_type = String(formData.get("activity_type") ?? "note");
-  const subject = (formData.get("subject") as string | null) ?? null;
-  const body = (formData.get("body") as string | null) ?? null;
-  if (!lead_id) throw new Error("lead_id required");
-  const supabase = await getSupabaseServerClient();
-  const { error } = await supabase.from("bd_activities").insert({
-    lead_id, author_id: profile.id, activity_type, subject, body,
-  });
-  if (error) throw new Error(error.message);
-  revalidatePath(`/bd/${lead_id}`);
+  const leadId = String(formData.get("lead_id") ?? "");
+  const activityType = activityTypeSchema.parse(
+    formData.get("activity_type") ?? undefined,
+  );
+  const subject = (formData.get("subject") as string | null) || null;
+  const body = (formData.get("body") as string | null) || null;
+  if (!leadId) throw new Error("lead_id required");
+
+  await withProfile(profile.id, (trx) =>
+    trx
+      .insertInto("bd_activities")
+      .values({
+        lead_id: leadId,
+        author_id: profile.id,
+        activity_type: activityType,
+        subject,
+        body,
+      })
+      .execute(),
+  );
+
+  revalidatePath(`/bd/${leadId}`);
 }
 
 export async function convertLeadToClient(leadId: string) {
-  await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const { data: lead } = await supabase
-    .from("bd_leads")
-    .select("company_name, industry")
-    .eq("id", leadId)
-    .single();
-  if (!lead) throw new Error("Lead not found");
+  const { profile } = await requireAuth();
 
-  const { data: client, error } = await supabase
-    .from("clients")
-    .insert({ name: lead.company_name, industry: lead.industry, status: "active" })
-    .select("id")
-    .single();
-  if (error) throw new Error(error.message);
+  // One transaction: a converted lead always has the client it points at.
+  const clientId = await withProfile(profile.id, async (trx) => {
+    const lead = await trx
+      .selectFrom("bd_leads")
+      .select(["company_name", "industry", "converted_client_id"])
+      .where("id", "=", leadId)
+      .executeTakeFirst();
+    if (!lead) throw new Error("Lead not found");
+    if (lead.converted_client_id) return lead.converted_client_id;
 
-  await supabase
-    .from("bd_leads")
-    .update({ stage: "converted", converted_client_id: client.id, converted_at: new Date().toISOString() })
-    .eq("id", leadId);
+    const client = await trx
+      .insertInto("clients")
+      .values({
+        name: lead.company_name,
+        industry: lead.industry,
+        status: "active",
+        created_by: profile.id,
+      })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+
+    await trx
+      .updateTable("bd_leads")
+      .set({
+        stage: "converted",
+        converted_client_id: client.id,
+        converted_at: new Date().toISOString(),
+      })
+      .where("id", "=", leadId)
+      .execute();
+
+    return client.id;
+  });
 
   revalidatePath("/bd");
   revalidatePath("/clients");
-  redirect(`/clients/${client.id}`);
+  redirect(`/clients/${clientId}`);
 }

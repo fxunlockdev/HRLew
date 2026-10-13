@@ -1,27 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import Papa from "papaparse";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { importCandidates } from "@/server/actions/candidates";
 
 interface Preview {
   rows: Record<string, string>[];
   errors: string[];
 }
 
+/**
+ * Parses the CSV in the browser for a preview, then hands the rows to a server
+ * action that inserts them in one transaction. The previous version inserted
+ * row-by-row straight from the browser, so a failure part-way through left half
+ * an import behind.
+ */
 export function CandidateCsvImport() {
   const router = useRouter();
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [pending, setPending] = useState(false);
+  const [pending, startTransition] = useTransition();
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    Papa.parse<Record<string, string>>(f, {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
       complete: (res) => {
@@ -32,67 +39,38 @@ export function CandidateCsvImport() {
             errors.push(`Row ${i + 2}: full_name is required`);
             return;
           }
-          rows.push(row);
+          // Skills may be separated by ; or , in the file; the action expects commas.
+          rows.push({ ...row, skills: (row.skills ?? "").split(/[;,]/).join(",") });
         });
         setPreview({ rows, errors });
       },
+      error: (err) => toast.error(err.message || "Could not read that file"),
     });
   }
 
-  async function commit() {
+  function commit() {
     if (!preview) return;
-    setPending(true);
-    const supabase = getSupabaseBrowserClient();
-    let ok = 0;
-    let skipped = 0;
-    const failures: string[] = [];
-
-    for (const row of preview.rows) {
-      const skills =
-        row.skills
-          ?.split(/[;,]/)
-          .map((s) => s.trim())
-          .filter(Boolean) ?? [];
-
-      const payload = {
-        full_name: row.full_name.trim(),
-        email: row.email?.trim() || null,
-        phone: row.phone?.trim() || null,
-        current_company: row.current_company?.trim() || null,
-        current_designation: row.current_designation?.trim() || null,
-        current_location: row.current_location?.trim() || null,
-        total_experience_years: row.total_experience_years ? Number(row.total_experience_years) : null,
-        current_ctc: row.current_ctc ? Number(row.current_ctc) : null,
-        expected_ctc: row.expected_ctc ? Number(row.expected_ctc) : null,
-        notice_period_days: row.notice_period_days ? Number(row.notice_period_days) : null,
-        skills,
-        source: row.source?.trim() || null,
-        status: "new",
-      };
-
-      if (payload.email) {
-        const { data: dup } = await supabase.from("candidates").select("id").eq("email", payload.email).maybeSingle();
-        if (dup) {
-          skipped += 1;
-          continue;
+    startTransition(async () => {
+      try {
+        const result = await importCandidates(preview.rows);
+        const noun = result.imported === 1 ? "candidate" : "candidates";
+        toast.success(
+          `Imported ${result.imported} ${noun}` +
+            (result.skipped ? `, skipped ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"}` : ""),
+        );
+        if (result.failures.length > 0) {
+          toast.error(`${result.failures.length} row(s) rejected: ${result.failures[0]}`);
         }
+        router.push("/candidates");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Import failed");
       }
-
-      const { error } = await supabase.from("candidates").insert(payload);
-      if (error) failures.push(`${payload.full_name}: ${error.message}`);
-      else ok += 1;
-    }
-
-    setPending(false);
-    toast.success(`Imported ${ok} candidate${ok === 1 ? "" : "s"}${skipped ? `, skipped ${skipped} duplicates` : ""}`);
-    if (failures.length) toast.error(`${failures.length} failed — see console for detail`);
-    if (failures.length) console.warn(failures);
-    router.push("/candidates");
+    });
   }
 
   return (
     <div className="space-y-4">
-      <Input type="file" accept=".csv" onChange={onFile} />
+      <Input type="file" accept=".csv" onChange={onFile} disabled={pending} />
 
       {preview && (
         <div className="rounded-md border bg-white p-3 text-sm">
@@ -108,7 +86,9 @@ export function CandidateCsvImport() {
             <Button onClick={commit} disabled={pending || preview.rows.length === 0}>
               {pending ? "Importing…" : `Import ${preview.rows.length} candidates`}
             </Button>
-            <Button variant="ghost" onClick={() => setPreview(null)}>Reset</Button>
+            <Button variant="ghost" onClick={() => setPreview(null)} disabled={pending}>
+              Reset
+            </Button>
           </div>
         </div>
       )}

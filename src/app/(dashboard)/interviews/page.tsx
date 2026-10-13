@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
 import { requireAuth } from "@/lib/auth";
 import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
@@ -17,15 +18,40 @@ export const metadata = { title: "Interviews · HR OS" };
 
 export default async function InterviewsPage() {
   const { profile, permissions } = await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const [{ data: rows }, statuses] = await Promise.all([
-    supabase
-      .from("interviews")
-      .select("id, scheduled_at, status, round_label, interview_type, interviewer_name, candidate:candidates(id, full_name), job:job_requirements(id, title), client:clients(id, name)")
-      .order("scheduled_at", { ascending: false })
-      .limit(200),
-    getSettingsList("interview_status"),
-  ]);
+  const { rows, statuses } = await withProfile(profile.id, async (trx) => ({
+    rows: await trx
+      .selectFrom("interviews")
+      .select((eb) => [
+        "interviews.id",
+        "interviews.scheduled_at",
+        "interviews.status",
+        "interviews.round_label",
+        "interviews.interview_type",
+        "interviews.interviewer_name",
+        jsonObjectFrom(
+          eb
+            .selectFrom("candidates")
+            .select(["candidates.id", "candidates.full_name"])
+            .whereRef("candidates.id", "=", "interviews.candidate_id"),
+        ).as("candidate"),
+        jsonObjectFrom(
+          eb
+            .selectFrom("job_requirements")
+            .select(["job_requirements.id", "job_requirements.title"])
+            .whereRef("job_requirements.id", "=", "interviews.job_id"),
+        ).as("job"),
+        jsonObjectFrom(
+          eb
+            .selectFrom("clients")
+            .select(["clients.id", "clients.name"])
+            .whereRef("clients.id", "=", "interviews.client_id"),
+        ).as("client"),
+      ])
+      .orderBy("scheduled_at", "desc")
+      .limit(200)
+      .execute(),
+    statuses: await getSettingsList(trx, "interview_status"),
+  }));
 
   return (
     <>
@@ -47,7 +73,7 @@ export default async function InterviewsPage() {
           <TabsTrigger value="calendar">Calendar</TabsTrigger>
         </TabsList>
         <TabsContent value="list">
-          {(rows ?? []).length === 0 ? (
+          {rows.length === 0 ? (
             <EmptyState title="No interviews scheduled" />
           ) : (
             <div className="rounded-lg border bg-white">
@@ -93,7 +119,7 @@ export default async function InterviewsPage() {
           )}
         </TabsContent>
         <TabsContent value="calendar">
-          <InterviewCalendar rows={(rows ?? []) as any} statuses={statuses} />
+          <InterviewCalendar rows={rows} statuses={statuses} />
         </TabsContent>
       </Tabs>
     </>

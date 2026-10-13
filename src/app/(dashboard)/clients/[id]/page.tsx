@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { withProfile } from "@/lib/db";
+import { jsonObjectFrom } from "kysely/helpers/postgres";
+import { sql } from "kysely";
 import { getSettingsList } from "@/lib/settings";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -19,33 +21,75 @@ import { hasPermission } from "@/lib/rbac";
 export default async function ClientDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { profile, permissions } = await requireAuth();
-  const supabase = await getSupabaseServerClient();
-  const { data: client } = await supabase.from("clients").select("*").eq("id", id).maybeSingle();
-  if (!client) notFound();
+  const data = await withProfile(profile.id, async (trx) => {
+    const client = await trx
+      .selectFrom("clients")
+      .selectAll()
+      .where("id", "=", id)
+      .executeTakeFirst();
+    if (!client) return null;
 
-  const [statuses, { data: owners }, { data: contacts }, { data: notes }, { data: jobs }, { data: placements }] =
-    await Promise.all([
-      getSettingsList("client_status"),
-      supabase.from("profiles").select("id, full_name").eq("status", "active").order("full_name"),
-      supabase.from("client_contacts").select("*").eq("client_id", id).order("is_primary", { ascending: false }),
-      supabase
-        .from("client_notes")
-        .select("id, body, created_at, author:profiles!client_notes_author_id_fkey(full_name)")
-        .eq("client_id", id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("job_requirements")
-        .select("id, title, status, openings, priority, target_closure_date, created_at")
-        .eq("client_id", id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("placements")
-        .select("placement_revenue, joining_date")
-        .eq("client_id", id),
-    ]);
+    return {
+      client,
+      statuses: await getSettingsList(trx, "client_status"),
+      owners: await trx
+        .selectFrom("profiles")
+        .select(["id", "full_name"])
+        .where("status", "=", "active")
+        .orderBy("full_name", "asc")
+        .execute(),
+      contacts: await trx
+        .selectFrom("client_contacts")
+        .selectAll()
+        .where("client_id", "=", id)
+        .orderBy("is_primary", "desc")
+        .execute(),
+      notes: await trx
+        .selectFrom("client_notes")
+        .select((eb) => [
+          "client_notes.id",
+          "client_notes.body",
+          "client_notes.created_at",
+          jsonObjectFrom(
+            eb
+              .selectFrom("profiles")
+              .select("profiles.full_name")
+              .whereRef("profiles.id", "=", "client_notes.author_id"),
+          ).as("author"),
+        ])
+        .where("client_id", "=", id)
+        .orderBy("created_at", "desc")
+        .execute(),
+      jobs: await trx
+        .selectFrom("job_requirements")
+        .select([
+          "id",
+          "title",
+          "status",
+          "openings",
+          "priority",
+          "target_closure_date",
+          "created_at",
+        ])
+        .where("client_id", "=", id)
+        .orderBy("created_at", "desc")
+        .execute(),
+      // Summed in the database rather than fetching every placement row.
+      totalRevenue:
+        (
+          await trx
+            .selectFrom("placements")
+            .select(sql<number>`coalesce(sum(placement_revenue), 0)::float8`.as("total"))
+            .where("client_id", "=", id)
+            .executeTakeFirst()
+        )?.total ?? 0,
+    };
+  });
+
+  if (!data) notFound();
+  const { client, statuses, owners, contacts, notes, jobs, totalRevenue } = data;
 
   const stat = statuses.find((s) => s.value === client.status);
-  const totalRevenue = placements?.reduce((s, p: any) => s + (p.placement_revenue ?? 0), 0) ?? 0;
   const canViewRevenue = hasPermission(profile, permissions, "kpi", "view_company") || profile.role?.name === "admin";
 
   return (
@@ -97,23 +141,23 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
           </TabsList>
 
           <TabsContent value="jobs">
-            <LinkedJobsList clientId={id} rows={(jobs ?? []) as any} />
+            <LinkedJobsList clientId={id} rows={jobs} />
           </TabsContent>
 
           <TabsContent value="contacts">
-            <ClientContacts clientId={id} contacts={(contacts ?? []) as any} />
+            <ClientContacts clientId={id} contacts={contacts} />
           </TabsContent>
 
           <TabsContent value="notes">
-            <ClientNotes clientId={id} notes={(notes ?? []) as any} />
+            <ClientNotes clientId={id} notes={notes} />
           </TabsContent>
 
           <TabsContent value="edit">
             <ClientForm
               mode="edit"
-              client={client as any}
+              client={client}
               statuses={statuses}
-              owners={owners ?? []}
+              owners={owners}
               canEditCommercial={hasPermission(profile, permissions, "clients", "edit_commercial") || profile.role?.name === "admin"}
             />
           </TabsContent>

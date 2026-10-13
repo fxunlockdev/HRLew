@@ -68,6 +68,9 @@ export function Topbar({ profile }: TopbarProps) {
             <DropdownMenuItem asChild>
               <Link href="/permissions">Permissions</Link>
             </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/auth/change-password">Change password</Link>
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <div className="p-1">
               <SignOutButton variant="ghost" className="w-full justify-start" />

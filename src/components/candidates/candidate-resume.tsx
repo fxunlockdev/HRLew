@@ -4,7 +4,6 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { attachResume } from "@/server/actions/candidates";
 import { toast } from "sonner";
 import { Download, FileText } from "lucide-react";
@@ -32,15 +31,24 @@ export function CandidateResume({ candidate, documents }: Props) {
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+
     setUploading(true);
     try {
-      const supabase = getSupabaseBrowserClient();
-      const path = `${candidate.id}/${Date.now()}_${file.name}`;
-      const { error } = await supabase.storage.from("resumes").upload(path, file);
-      if (error) throw error;
+      // The server validates type and size, stores the object, and tells us
+      // the key to record against the candidate.
+      const body = new FormData();
+      body.set("kind", "resume");
+      body.set("candidate_id", candidate.id);
+      body.set("file", file);
+
+      const response = await fetch("/api/uploads", { method: "POST", body });
+      const payload = (await response.json()) as { key?: string; error?: string };
+      if (!response.ok || !payload.key) throw new Error(payload.error ?? "Upload failed");
+
+      const key = payload.key;
       startTransition(async () => {
         try {
-          await attachResume(candidate.id, file.name, path, file.type, file.size);
+          await attachResume(candidate.id, file.name, key, file.type, file.size);
           toast.success("Resume uploaded");
         } catch (err) {
           toast.error(err instanceof Error ? err.message : "Upload failed");
@@ -54,23 +62,18 @@ export function CandidateResume({ candidate, documents }: Props) {
     }
   }
 
-  async function download(path: string) {
-    const supabase = getSupabaseBrowserClient();
-    const { data, error } = await supabase.storage.from("resumes").createSignedUrl(path, 60);
-    if (error || !data) {
-      toast.error("Could not download");
-      return;
-    }
-    window.open(data.signedUrl, "_blank");
-  }
-
   return (
     <div className="space-y-3">
       <Card>
         <CardContent className="p-4 space-y-3">
           <p className="text-sm font-medium">Upload resume</p>
-          <Input type="file" accept=".pdf,.doc,.docx" onChange={onFile} disabled={uploading || pending} />
-          <p className="text-xs text-muted-foreground">PDF / DOC / DOCX accepted.</p>
+          <Input
+            type="file"
+            accept=".pdf,.doc,.docx"
+            onChange={onFile}
+            disabled={uploading || pending}
+          />
+          <p className="text-xs text-muted-foreground">PDF / DOC / DOCX, up to 10 MB.</p>
         </CardContent>
       </Card>
 
@@ -79,16 +82,31 @@ export function CandidateResume({ candidate, documents }: Props) {
       ) : (
         <ul className="space-y-2">
           {documents.map((d) => (
-            <li key={d.id} className="flex items-center justify-between rounded-md border bg-white p-3">
+            <li
+              key={d.id}
+              className="flex items-center justify-between rounded-md border bg-white p-3"
+            >
               <div className="flex items-center gap-2">
                 <FileText className="h-4 w-4 text-muted-foreground" />
                 <div>
                   <p className="text-sm font-medium">{d.file_name}</p>
-                  <p className="text-xs text-muted-foreground">{d.category} · {formatDate(d.created_at)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {d.category} · {formatDate(d.created_at)}
+                  </p>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={() => download(d.storage_path)}>
-                <Download className="h-4 w-4" /> Download
+              {/* Resolves to a short-lived presigned URL server-side. */}
+              <Button asChild variant="outline" size="sm">
+                <a
+                  href={`/api/files/${d.storage_path
+                    .split("/")
+                    .map(encodeURIComponent)
+                    .join("/")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Download className="h-4 w-4" /> Download
+                </a>
               </Button>
             </li>
           ))}
