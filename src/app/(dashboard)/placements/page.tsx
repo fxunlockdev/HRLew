@@ -87,7 +87,7 @@ export default async function PlacementsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows!.map((p: any) => {
+              {rows.map((p) => {
                 const stat = statuses.find((s) => s.value === p.status);
                 return (
                   <TableRow key={p.id}>

@@ -127,7 +127,7 @@ export default async function InterviewDetail({ params }: { params: Promise<{ id
             <TabsTrigger value="edit">Edit</TabsTrigger>
           </TabsList>
           <TabsContent value="feedback">
-            <InterviewFeedbackForm interviewId={id} current={iv as any} />
+            <InterviewFeedbackForm interviewId={id} current={iv} />
           </TabsContent>
           <TabsContent value="edit">
             <InterviewForm

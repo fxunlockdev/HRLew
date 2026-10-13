@@ -3,7 +3,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Bar,
-  BarChart,
   CartesianGrid,
   Line,
   ComposedChart,

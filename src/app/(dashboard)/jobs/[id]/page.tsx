@@ -162,12 +162,12 @@ export default async function JobDetail({ params }: { params: Promise<{ id: stri
           </TabsList>
 
           <TabsContent value="pipeline">
-            <JobPipelineList rows={(pipeline ?? []) as any} canViewCtc={canViewSalary} />
+            <JobPipelineList rows={pipeline} canViewCtc={canViewSalary} />
           </TabsContent>
 
           <TabsContent value="funnel">
             <JobFunnelView
-              rows={(pipeline ?? []) as any}
+              rows={pipeline}
               stages={pipelineStages}
               clientName={job.client?.name ?? "Client"}
               clientLogoUrl={job.client?.logo_url}
@@ -183,7 +183,7 @@ export default async function JobDetail({ params }: { params: Promise<{ id: stri
               {(interviews ?? []).length === 0 ? (
                 <p className="text-sm text-muted-foreground">No interviews yet.</p>
               ) : (
-                interviews?.map((iv: any) => (
+                interviews.map((iv) => (
                   <li key={iv.id} className="flex items-center justify-between rounded-md border bg-white p-3 text-sm">
                     <span>{iv.candidate?.full_name}</span>
                     <span className="text-xs text-muted-foreground">{formatDate(iv.scheduled_at)} · {iv.status}</span>
@@ -196,7 +196,7 @@ export default async function JobDetail({ params }: { params: Promise<{ id: stri
           <TabsContent value="edit">
             <JobForm
               mode="edit"
-              job={job as any}
+              job={job}
               statuses={statuses}
               clients={clients ?? []}
               canEditSalary={canEditSalary}

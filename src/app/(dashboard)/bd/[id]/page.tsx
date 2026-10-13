@@ -96,7 +96,7 @@ export default async function BdLeadDetail({ params }: { params: Promise<{ id: s
           </CardContent>
         </Card>
 
-        <BdActivityFeed leadId={id} activities={(activities ?? []) as any} />
+        <BdActivityFeed leadId={id} activities={activities} />
       </div>
     </>
   );

@@ -68,7 +68,7 @@ export default async function StaffPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows!.map((s: any) => (
+              {rows.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell>
                     <Link href={`/staff/${s.id}`} className="font-medium hover:underline">{s.full_name}</Link>

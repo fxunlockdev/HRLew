@@ -90,7 +90,7 @@ export default async function InterviewsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows!.map((r: any) => {
+                  {rows.map((r) => {
                     const stat = statuses.find((s) => s.value === r.status);
                     return (
                       <TableRow key={r.id}>
