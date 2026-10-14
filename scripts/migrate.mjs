@@ -10,6 +10,7 @@
  *   DATABASE_URL=postgres://... node scripts/migrate.mjs
  *   DATABASE_URL=... APP_DB_PASSWORD=... node scripts/migrate.mjs   # also provisions the hr_app role
  *   DATABASE_URL=... node scripts/migrate.mjs --demo                # plus db/demo_data.sql
+ *   SEED_DEMO=1 ...                                                 # same, for a deploy step
  *   DATABASE_URL=... node scripts/migrate.mjs --status              # report only, change nothing
  *
  * Connect with the privileged (superuser) URL Railway gives you. The app itself
@@ -27,7 +28,8 @@ const DEMO_FILE = join(HERE, "..", "db", "demo_data.sql");
 const APP_ROLE = "hr_app";
 
 const args = new Set(process.argv.slice(2));
-const wantDemo = args.has("--demo");
+const wantDemo =
+  args.has("--demo") || ["1", "true"].includes((process.env.SEED_DEMO ?? "").toLowerCase());
 const statusOnly = args.has("--status");
 
 const connectionString = process.env.DATABASE_URL;
