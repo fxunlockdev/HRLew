@@ -281,10 +281,16 @@ and a Bucket.
    `postgres.railway.internal` so traffic stays on the private network.
 3. **Bucket** — add a Bucket and reference `BUCKET`, `ENDPOINT`, `REGION`,
    `ACCESS_KEY_ID` and `SECRET_ACCESS_KEY` into the app service.
-4. **App** — deploy from GitHub. `railway.json` sets the Railpack builder, the
-   `/api/health` healthcheck, and a pre-deploy command that runs
-   `npm run db:migrate`, so each deploy migrates before the new container
-   takes traffic.
+4. **App** — set these on the service itself (Settings → Deploy):
+   - Pre-deploy command: `npm run db:migrate`
+   - Health check path: `/api/health`
+   - Restart policy: on failure, 10 retries
+
+   `railway.json` carries the same settings, but **Railway only reads it for
+   services created before config-as-code was deprecated**. A service created
+   today ignores the file entirely — including the pre-deploy command, which
+   means the database never gets migrated and the app starts against an empty
+   schema. Configure new services through the dashboard or the API.
 5. **First sign-in** — open the deployed URL and complete `/auth/setup`.
 
 Do **not** set `NODE_ENV=production` as a service variable. `next build` and
