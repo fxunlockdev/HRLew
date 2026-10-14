@@ -51,6 +51,42 @@ test.describe("Authenticated dashboard", () => {
     await expect(page.getByRole("heading", { name: /Pipeline/i })).toBeVisible();
   });
 
+  test("an admin can provision and then delete a user", async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.goto("/permissions");
+
+    // This test creates its own subject, so it never deletes anyone real.
+    const stamp = Date.now();
+    const subject = `e2e.delete.${stamp}@example.test`;
+
+    await page.getByRole("button", { name: /add user/i }).click();
+    await page.locator('input[name="full_name"]').fill(`E2E Delete ${stamp}`);
+    await page.locator('input[name="email"]').fill(subject);
+    await page.getByRole("button", { name: /create user/i }).click();
+
+    // Provisioning shows the one-time password and the user appears in the table.
+    await expect(page.getByText(/temporary password issued/i)).toBeVisible();
+    const row = page.locator("tr", { hasText: subject });
+    await expect(row).toBeVisible();
+
+    await row.getByRole("button", { name: /delete/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText(new RegExp(`Delete E2E Delete ${stamp}`))).toBeVisible();
+
+    // A brand-new user owns nothing, so no reassignment is required.
+    await expect(dialog.getByText(/do not own any records/i)).toBeVisible();
+    await dialog.getByRole("button", { name: /delete user/i }).click();
+
+    await expect(page.locator("tr", { hasText: subject })).toHaveCount(0);
+  });
+
+  test("an admin cannot delete their own account", async ({ page }) => {
+    await page.goto("/permissions");
+    const ownRow = page.locator("tr", { hasText: email! });
+    await expect(ownRow).toBeVisible();
+    await expect(ownRow.getByRole("button", { name: /delete/i })).toHaveCount(0);
+  });
+
   test("signing out ends the session", async ({ page }) => {
     await page.goto("/dashboard");
     await page.locator("header button").last().click();

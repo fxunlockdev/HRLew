@@ -69,7 +69,12 @@ export default async function PermissionsPage() {
         </TabsList>
         <TabsContent value="users" className="space-y-4">
           {canManage && <CreateUserForm roles={roles} />}
-          <UserRoleEditor profiles={profiles} roles={roles} canManage={canManage} />
+          <UserRoleEditor
+            profiles={profiles}
+            roles={roles}
+            canManage={canManage}
+            currentProfileId={ctx.profile.id}
+          />
         </TabsContent>
         <TabsContent value="matrix">
           <RolePermissionMatrix roles={roles} permissions={permissions} grants={rolePerms} />

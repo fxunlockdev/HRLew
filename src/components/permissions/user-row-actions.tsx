@@ -5,14 +5,20 @@ import { KeyRound, LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CredentialsCallout } from "@/components/permissions/credentials-callout";
+import { DeleteUserDialog } from "@/components/permissions/delete-user-dialog";
 import { resetUserPassword, revokeUserSessions, type UserAdminState } from "@/server/actions/users";
 
 interface Props {
   profileId: string;
   email: string;
+  fullName: string | null;
+  /** Active users this person's records can be handed over to. */
+  reassignTargets: { id: string; full_name: string | null; email: string }[];
+  /** You cannot delete the account you are signed in as. */
+  isSelf: boolean;
 }
 
-export function UserRowActions({ profileId, email }: Props) {
+export function UserRowActions({ profileId, email, fullName, reassignTargets, isSelf }: Props) {
   const [state, formAction, resetting] = useActionState<UserAdminState, FormData>(
     resetUserPassword,
     {},
@@ -44,6 +50,14 @@ export function UserRowActions({ profileId, email }: Props) {
           <LogOut className="h-3.5 w-3.5" />
           {signingOut ? "Signing out…" : "Sign out"}
         </Button>
+        {!isSelf && (
+          <DeleteUserDialog
+            profileId={profileId}
+            email={email}
+            fullName={fullName}
+            reassignTargets={reassignTargets}
+          />
+        )}
       </div>
 
       {state.error && <p className="text-xs text-red-700">{state.error}</p>}

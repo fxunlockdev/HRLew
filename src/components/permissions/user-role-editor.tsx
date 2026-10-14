@@ -31,11 +31,18 @@ export function UserRoleEditor({
   profiles,
   roles,
   canManage,
+  currentProfileId,
 }: {
   profiles: Profile[];
   roles: Role[];
   canManage: boolean;
+  currentProfileId: string;
 }) {
+  // Anyone active other than the person being deleted can inherit their work.
+  const reassignTargets = profiles
+    .filter((p) => p.status === "active")
+    .map((p) => ({ id: p.id, full_name: p.full_name, email: p.email }));
+
   const [pending, startTransition] = useTransition();
 
   function update(profileId: string, roleId: string, status: string) {
@@ -100,7 +107,13 @@ export function UserRoleEditor({
               <TableCell className="text-xs text-muted-foreground">{formatDate(p.created_at)}</TableCell>
               {canManage && (
                 <TableCell>
-                  <UserRowActions profileId={p.id} email={p.email} />
+                  <UserRowActions
+                    profileId={p.id}
+                    email={p.email}
+                    fullName={p.full_name}
+                    isSelf={p.id === currentProfileId}
+                    reassignTargets={reassignTargets.filter((t) => t.id !== p.id)}
+                  />
                 </TableCell>
               )}
             </TableRow>

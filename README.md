@@ -145,6 +145,29 @@ itself again. Everyone else is created by an admin from `/permissions`.
 | Forced rotation    | `must_change_password` gates every route until the user picks their own      |
 | Password change    | Revokes every other session, then re-establishes the current one             |
 | Admin recovery     | "Reset password" issues a new temporary password and signs the user out      |
+| Deletion           | Reassigns what they own, detaches what they authored, removes the account    |
+
+### Deleting a user
+
+`profiles` is referenced by 21 columns with no `ON DELETE` behaviour, so a plain
+delete is refused by Postgres. `delete_profile()` (migration 0009) splits those
+references in two:
+
+- **Ownership** — clients, candidates, jobs, pipeline entries, interviews,
+  placements, BD leads and tasks are **reassigned** to another active user. The
+  work outlives the person; the admin picks who inherits it, and the dialog
+  shows exactly how much is moving before they confirm.
+- **Authorship and history** — notes, uploaded documents, BD activity, pipeline
+  stage changes and the audit log are **kept and detached** (the reference is
+  nulled). Reattributing someone's note to a colleague would be a lie, and the
+  audit trail has to stay honest that the actor is gone.
+
+Deleting the `app_users` row cascades to the profile and to every session they
+hold, so a deleted user is signed out everywhere at once. The database refuses
+to delete your own account, and refuses callers who are not admins — the app
+checks `rbac.manage` first, and the function checks again. No "last admin"
+check is needed: the caller must be an active admin and cannot delete
+themselves, so one always remains.
 
 `src/middleware.ts` only checks whether a session cookie is present — it runs on
 the edge runtime, where a Postgres connection is not available. Authorisation
